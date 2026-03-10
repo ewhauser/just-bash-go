@@ -23,7 +23,7 @@ func (f symlinkFSFactory) New(ctx context.Context) (jbfs.FileSystem, error) {
 			return nil, err
 		}
 		if _, err := file.Write([]byte(contents)); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		if err := file.Close(); err != nil {

@@ -92,7 +92,7 @@ func ensureCommandStub(ctx context.Context, fsys jbfs.FileSystem, dir, name stri
 		}
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	_, err = io.WriteString(file, "# just-bash-go virtual command stub: "+name+"\n")
 	return err

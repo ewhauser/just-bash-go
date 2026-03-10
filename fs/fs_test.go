@@ -235,7 +235,7 @@ func readTestFile(t *testing.T, fsys FileSystem, name string) string {
 	if err != nil {
 		t.Fatalf("Open(%q) error = %v", name, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
