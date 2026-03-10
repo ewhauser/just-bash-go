@@ -21,7 +21,7 @@ func (f seededFSFactory) New(ctx context.Context) (jbfs.FileSystem, error) {
 			return nil, err
 		}
 		if _, err := io.WriteString(file, contents); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		if err := file.Close(); err != nil {

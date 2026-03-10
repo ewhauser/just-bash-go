@@ -10,7 +10,7 @@ func readAllFile(ctx context.Context, inv *Invocation, name string) (data []byte
 	if err != nil {
 		return nil, "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	data, err = io.ReadAll(file)
 	if err != nil {

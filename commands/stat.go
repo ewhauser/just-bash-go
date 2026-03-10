@@ -103,12 +103,12 @@ func renderStatFormat(ctx context.Context, inv *Invocation, abs string, info std
 				if err != nil {
 					return "", err
 				}
-				b.WriteString(fmt.Sprintf("%q -> %q", abs, target))
+				fmt.Fprintf(&b, "%q -> %q", abs, target)
 			} else {
-				b.WriteString(fmt.Sprintf("%q", abs))
+				fmt.Fprintf(&b, "%q", abs)
 			}
 		case 's':
-			b.WriteString(fmt.Sprintf("%d", info.Size()))
+			fmt.Fprintf(&b, "%d", info.Size())
 		case 'F':
 			b.WriteString(fileTypeName(info))
 		case 'a':

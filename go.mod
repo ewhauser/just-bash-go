@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/benhoyt/goawk v1.31.0 // indirect
 	github.com/itchyny/timefmt-go v0.1.7 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 )

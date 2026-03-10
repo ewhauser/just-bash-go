@@ -1,3 +1,10 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
 linters:
   enable:
     - errcheck
@@ -5,27 +12,24 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - gosimple
     - gocritic
     - revive
     - misspell
-    - gofmt
-    - goimports
 
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        disabled: true
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
 
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
 
-  misspell:
-    locale: US
+    misspell:
+      locale: US
 
 issues:
   max-issues-per-linter: 50

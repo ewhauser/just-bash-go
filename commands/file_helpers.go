@@ -45,13 +45,13 @@ func copyFileContents(ctx context.Context, inv *Invocation, srcAbs, dstAbs strin
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := inv.FS.OpenFile(ctx, dstAbs, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return &ExitError{Code: 1, Err: err}
@@ -116,7 +116,7 @@ func writeFileContents(ctx context.Context, inv *Invocation, targetAbs string, d
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if _, err := file.Write(data); err != nil {
 		return &ExitError{Code: 1, Err: err}

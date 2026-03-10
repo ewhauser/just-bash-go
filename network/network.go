@@ -298,7 +298,7 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 			if location == "" {
 				return c.readResponse(currentURL, resp)
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			nextURL, err := resolveRedirectURL(currentURL, location)
 			if err != nil {
@@ -320,7 +320,7 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 }
 
 func (c *HTTPClient) readResponse(requestURL string, resp *http.Response) (*Response, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if c.cfg.maxResponseBytes > 0 && resp.ContentLength > c.cfg.maxResponseBytes {
 		return nil, &ResponseTooLargeError{MaxBytes: c.cfg.maxResponseBytes}

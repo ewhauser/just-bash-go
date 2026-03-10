@@ -84,7 +84,7 @@ func writeSessionFile(t *testing.T, session *Session, name string, data []byte) 
 	if err != nil {
 		t.Fatalf("OpenFile(%q) error = %v", name, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	if _, err := file.Write(data); err != nil {
 		t.Fatalf("Write(%q) error = %v", name, err)

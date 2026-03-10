@@ -468,8 +468,8 @@ func envMapFromVars(vars map[string]expand.Variable) map[string]string {
 	return out
 }
 
-func pathError(op, path string, err error) error {
-	return &os.PathError{Op: op, Path: path, Err: err}
+func pathError(op, p string, err error) error {
+	return &os.PathError{Op: op, Path: p, Err: err}
 }
 
 func handlerPathError(ctx context.Context, stderr io.Writer, op, name string, err error) error {
@@ -708,7 +708,7 @@ func recordCommand(rec trace.Recorder, kind trace.Kind, command *trace.CommandEv
 	})
 }
 
-func recordFile(rec trace.Recorder, action, path string) {
+func recordFile(rec trace.Recorder, action, filePath string) {
 	if rec == nil {
 		return
 	}
@@ -717,12 +717,12 @@ func recordFile(rec trace.Recorder, action, path string) {
 		At:   time.Now().UTC(),
 		File: &trace.FileEvent{
 			Action: action,
-			Path:   path,
+			Path:   filePath,
 		},
 	})
 }
 
-func recordFileMutation(rec trace.Recorder, action, path, fromPath, toPath string) {
+func recordFileMutation(rec trace.Recorder, action, filePath, fromPath, toPath string) {
 	if rec == nil {
 		return
 	}
@@ -731,14 +731,14 @@ func recordFileMutation(rec trace.Recorder, action, path, fromPath, toPath strin
 		At:   time.Now().UTC(),
 		File: &trace.FileEvent{
 			Action:   action,
-			Path:     path,
+			Path:     filePath,
 			FromPath: fromPath,
 			ToPath:   toPath,
 		},
 	})
 }
 
-func recordPolicyDenied(rec trace.Recorder, err error, action, path, command string, exitCode int, resolutionSource string) {
+func recordPolicyDenied(rec trace.Recorder, err error, action, filePath, command string, exitCode int, resolutionSource string) {
 	if rec == nil || !policy.IsDenied(err) {
 		return
 	}
@@ -754,7 +754,7 @@ func recordPolicyDenied(rec trace.Recorder, err error, action, path, command str
 			Subject:          denied.Subject,
 			Reason:           denied.Reason,
 			Action:           action,
-			Path:             path,
+			Path:             filePath,
 			Command:          command,
 			ExitCode:         exitCode,
 			ResolutionSource: resolutionSource,
