@@ -1,0 +1,133 @@
+name: Compat
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: compat-pages
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    runs-on: ubuntu-24.04
+    outputs:
+      exit_code: ${{ steps.run-compat.outputs.exit_code }}
+      publishable: ${{ steps.publish-state.outputs.publishable }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/configure-pages@v5
+
+      - name: Run GNU compatibility harness
+        id: run-compat
+        env:
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+        run: |
+          set +e
+          mkdir -p "$GNU_RESULTS_DIR"
+          GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Render compat report assets
+        if: always()
+        env:
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+        run: |
+          set +e
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ]; then
+            go run ./scripts/compat-report --summary "$GNU_RESULTS_DIR/summary.json" --output "$GNU_RESULTS_DIR"
+          fi
+          exit 0
+
+      - name: Determine publishable compat bundle
+        id: publish-state
+        if: always()
+        env:
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+        run: |
+          set -euo pipefail
+
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ] && { [ ! -f "$GNU_RESULTS_DIR/index.html" ] || [ ! -f "$GNU_RESULTS_DIR/badge.svg" ]; }; then
+            set +e
+            go run ./scripts/compat-report --summary "$GNU_RESULTS_DIR/summary.json" --output "$GNU_RESULTS_DIR"
+            set -e
+          fi
+
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ] && [ -f "$GNU_RESULTS_DIR/index.html" ] && [ -f "$GNU_RESULTS_DIR/badge.svg" ]; then
+            mkdir -p "$PAGES_ROOT"
+            cat > "$PAGES_ROOT/index.html" <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta http-equiv="refresh" content="0; url=./compat/latest/">
+            <title>jbgo compatibility</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="./compat/latest/">the latest compatibility report</a>.</p>
+          </body>
+          </html>
+          EOF
+            echo "publishable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summarize compat run
+        if: always()
+        env:
+          PAGE_URL: https://ewhauser.github.io/jbgo/compat/latest/
+          COMPAT_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
+          PUBLISHABLE: ${{ steps.publish-state.outputs.publishable }}
+        run: |
+          {
+            echo "## Compatibility"
+            echo
+            echo "Harness exit code: \`$COMPAT_EXIT_CODE\`"
+            echo
+            if [ "$PUBLISHABLE" = "true" ]; then
+              echo "Published latest report: $PAGE_URL"
+            else
+              echo "No new report published. The previous report remains in place at $PAGE_URL"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw compat artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-results-${{ github.run_id }}
+          path: ${{ runner.temp }}/compat-pages/compat/latest
+          retention-days: 30
+
+      - name: Upload Pages artifact
+        if: always() && steps.publish-state.outputs.publishable == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/compat-pages
+
+  publish:
+    if: always() && needs.compat.outputs.publishable == 'true'
+    needs: compat
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
