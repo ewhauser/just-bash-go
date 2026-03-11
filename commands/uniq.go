@@ -11,6 +11,7 @@ type Uniq struct{}
 type uniqOptions struct {
 	countOnly      bool
 	duplicatesOnly bool
+	ignoreCase     bool
 	uniqueOnly     bool
 }
 
@@ -53,7 +54,7 @@ func (c *Uniq) Run(ctx context.Context, inv *Invocation) error {
 		}
 	}
 
-	for _, group := range uniqGroups(lines) {
+	for _, group := range uniqGroups(lines, opts.ignoreCase) {
 		if !shouldPrintUniqGroup(group, opts) {
 			continue
 		}
@@ -92,6 +93,8 @@ func parseUniqArgs(inv *Invocation) (uniqOptions, []string, error) {
 			opts.countOnly = true
 		case "-d", "--repeated":
 			opts.duplicatesOnly = true
+		case "-i", "--ignore-case":
+			opts.ignoreCase = true
 		case "-u", "--unique":
 			opts.uniqueOnly = true
 		default:
@@ -102,6 +105,8 @@ func parseUniqArgs(inv *Invocation) (uniqOptions, []string, error) {
 						opts.countOnly = true
 					case 'd':
 						opts.duplicatesOnly = true
+					case 'i':
+						opts.ignoreCase = true
 					case 'u':
 						opts.uniqueOnly = true
 					default:
@@ -118,14 +123,14 @@ func parseUniqArgs(inv *Invocation) (uniqOptions, []string, error) {
 	return opts, args, nil
 }
 
-func uniqGroups(lines []string) []uniqGroup {
+func uniqGroups(lines []string, ignoreCase bool) []uniqGroup {
 	if len(lines) == 0 {
 		return nil
 	}
 	groups := make([]uniqGroup, 0, len(lines))
 	current := uniqGroup{line: lines[0], count: 1}
 	for _, line := range lines[1:] {
-		if line == current.line {
+		if equalUniqLine(line, current.line, ignoreCase) {
 			current.count++
 			continue
 		}
@@ -134,6 +139,13 @@ func uniqGroups(lines []string) []uniqGroup {
 	}
 	groups = append(groups, current)
 	return groups
+}
+
+func equalUniqLine(left, right string, ignoreCase bool) bool {
+	if ignoreCase {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func shouldPrintUniqGroup(group uniqGroup, opts uniqOptions) bool {

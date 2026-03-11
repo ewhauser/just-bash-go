@@ -601,6 +601,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 - `rg` supports recursive regex search with `-n`, `-i`, `-l`, `-c`, `-g`, `--hidden`, and `--files`
 - `awk` is backed by `goawk` and supports `-F`, `-v`, and `-f`, but keeps `system()`, shell pipes, file writes, and extra file reads disabled inside the sandbox
 - `comm` supports two-input comparisons plus column suppression via `-1`, `-2`, and `-3`
+- `uniq` supports adjacent-run filtering plus counts, duplicate-only / unique-only modes, and `-i/--ignore-case`
 - `paste` supports parallel and serial modes via `-s` and `-d`, including repeated `-` stdin inputs
 - `tr` supports translate, delete, squeeze, complement, ranges, escapes, and a focused set of POSIX character classes
 - `rev` and `tac` support Unicode-safe line reversal and reverse-line streaming
