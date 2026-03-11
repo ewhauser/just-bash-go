@@ -262,7 +262,7 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `env`
 
-- [ ] `--ignore-environment`
+- [x] `--ignore-environment`
 
 #### `file`
 

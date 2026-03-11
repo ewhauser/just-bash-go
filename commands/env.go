@@ -97,7 +97,7 @@ func parseEnvArgs(inv *Invocation) (replaceEnv bool, unset []string, setPairs ma
 	for len(args) > 0 {
 		arg := args[0]
 		switch {
-		case arg == "-i":
+		case arg == "-i" || arg == "--ignore-environment":
 			replaceEnv = true
 			args = args[1:]
 		case arg == "-u":
@@ -106,8 +106,17 @@ func parseEnvArgs(inv *Invocation) (replaceEnv bool, unset []string, setPairs ma
 			}
 			unset = append(unset, args[1])
 			args = args[2:]
+		case arg == "--unset":
+			if len(args) < 2 {
+				return false, nil, nil, nil, exitf(inv, 1, "env: option requires an argument -- unset")
+			}
+			unset = append(unset, args[1])
+			args = args[2:]
 		case strings.HasPrefix(arg, "-u") && len(arg) > 2:
 			unset = append(unset, arg[2:])
+			args = args[1:]
+		case strings.HasPrefix(arg, "--unset="):
+			unset = append(unset, strings.TrimPrefix(arg, "--unset="))
 			args = args[1:]
 		case strings.Contains(arg, "=") && !strings.HasPrefix(arg, "="):
 			name, value, _ := strings.Cut(arg, "=")

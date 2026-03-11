@@ -613,7 +613,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 For the shell/process helper batch, the runtime should expose practical, sandbox-owned subsets:
 
 - `tee` supports stdout passthrough, writing one or more files, and `-a` append mode
-- `env` supports `-i`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
+- `env` supports `-i/--ignore-environment`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
 - `printenv` prints either the whole environment or named variables and exits non-zero when a requested variable is missing
 - `true` and `false` exist as explicit virtual commands, while bare shell builtins remain interpreter-owned unless intentionally shadowed
 - `which` supports `-a` and `-s` over the virtual `PATH`
