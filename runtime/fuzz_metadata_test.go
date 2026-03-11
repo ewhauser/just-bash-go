@@ -204,6 +204,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("env", "shell",
 			fuzzVariant("", "flag:i", "-i", "ONLY={token.value}", "printenv", "ONLY"),
 			fuzzVariant("", "flag:u", "-u", "HOME", "printenv", "PWD"),
+			fuzzVariant("", "flag:long", "--ignore-environment", "ONLY={token.value}", "printenv", "ONLY"),
 		),
 		fuzzSpec("printenv", "shell",
 			fuzzVariant("", "env", "HOME"),
