@@ -22,7 +22,8 @@ func FuzzBasenameCommand(f *testing.F) {
 		target := fuzzPath(rawPath) + ".txt"
 
 		script := []byte(fmt.Sprintf(
-			"basename --suffix .txt %s >/tmp/basename.txt\n",
+			"basename --suffix .txt %s >/tmp/basename.txt\nbasename -z --suffix .txt %s >/tmp/basename-zero.txt\n",
+			shellQuote(target),
 			shellQuote(target),
 		))
 
