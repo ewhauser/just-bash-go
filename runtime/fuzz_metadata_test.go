@@ -272,6 +272,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("base64", "data",
 			fuzzVariant("", "path.read", "{path.text}"),
 			fuzzVariant("base64", "flag:d", "-d"),
+			fuzzVariant("", "flag:long", "--wrap", "0", "{path.text}"),
 		),
 		fuzzSpec("tar", "data",
 			fuzzVariant("", "flag:cf", "-cf", "{path.archive}", "{path.dir}"),

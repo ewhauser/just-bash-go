@@ -191,7 +191,7 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `base64`
 
-- [ ] `--wrap`
+- [x] `--wrap`
 
 #### `basename`
 

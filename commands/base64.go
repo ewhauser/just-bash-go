@@ -38,10 +38,27 @@ func (c *Base64) Run(ctx context.Context, inv *Invocation) error {
 			}
 			wrap = value
 			args = args[2:]
+		case args[0] == "--wrap":
+			if len(args) < 2 {
+				return exitf(inv, 1, "base64: option requires an argument -- wrap")
+			}
+			value, err := strconv.Atoi(args[1])
+			if err != nil || value < 0 {
+				return exitf(inv, 1, "base64: invalid wrap size %q", args[1])
+			}
+			wrap = value
+			args = args[2:]
 		case strings.HasPrefix(args[0], "-w"):
 			value, err := strconv.Atoi(strings.TrimPrefix(args[0], "-w"))
 			if err != nil || value < 0 {
 				return exitf(inv, 1, "base64: invalid wrap size %q", strings.TrimPrefix(args[0], "-w"))
+			}
+			wrap = value
+			args = args[1:]
+		case strings.HasPrefix(args[0], "--wrap="):
+			value, err := strconv.Atoi(strings.TrimPrefix(args[0], "--wrap="))
+			if err != nil || value < 0 {
+				return exitf(inv, 1, "base64: invalid wrap size %q", strings.TrimPrefix(args[0], "--wrap="))
 			}
 			wrap = value
 			args = args[1:]
