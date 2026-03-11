@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	jbruntime "github.com/ewhauser/jbgo/runtime"
 	"golang.org/x/term"
@@ -16,7 +18,21 @@ type cliOptions struct {
 	showVersion bool
 }
 
-func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, stdinTTY bool) (int, error) {
+type compatInvocation struct {
+	utility    string
+	args       []string
+	commandDir string
+}
+
+func runCLI(ctx context.Context, argv0 string, args []string, stdin io.Reader, stdout, stderr io.Writer, stdinTTY bool) (int, error) {
+	compat, err := parseCompatInvocation(argv0, args)
+	if err != nil {
+		return 2, err
+	}
+	if compat != nil {
+		return runCompatInvocation(ctx, argv0, *compat, stdin, stdout, stderr)
+	}
+
 	opts, err := parseCLIOptions(args, stderr)
 	if err != nil {
 		return 2, err
@@ -53,6 +69,53 @@ func parseCLIOptions(args []string, stderr io.Writer) (cliOptions, error) {
 		return cliOptions{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 	return opts, nil
+}
+
+func parseCompatInvocation(argv0 string, args []string) (*compatInvocation, error) {
+	if utility := multicallUtilityName(argv0); utility != "" {
+		commandDir, err := resolveCommandDir(filepath.Dir(argv0))
+		if err != nil {
+			return nil, err
+		}
+		return &compatInvocation{
+			utility:    utility,
+			args:       append([]string(nil), args...),
+			commandDir: commandDir,
+		}, nil
+	}
+	if len(args) == 0 || args[0] != "compat" {
+		return nil, nil
+	}
+	if len(args) < 2 || args[1] != "exec" {
+		return nil, fmt.Errorf("usage: jbgo compat exec <utility> [args...]")
+	}
+	if len(args) < 3 {
+		return nil, fmt.Errorf("jbgo compat exec requires a utility name")
+	}
+	return &compatInvocation{
+		utility: args[2],
+		args:    append([]string(nil), args[3:]...),
+	}, nil
+}
+
+func multicallUtilityName(argv0 string) string {
+	base := strings.TrimSpace(filepath.Base(argv0))
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	if base == "" || base == "jbgo" {
+		return ""
+	}
+	return base
+}
+
+func resolveCommandDir(dir string) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		dir = "."
+	}
+	resolved, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(resolved), nil
 }
 
 func runScript(ctx context.Context, rt *jbruntime.Runtime, stdin io.Reader, stdout, stderr io.Writer) (int, error) {

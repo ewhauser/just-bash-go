@@ -17,6 +17,7 @@ coverage.html
 # Common local build directories
 bin/
 dist/
+.cache/gnu/
 .gocache
 
 # Editor and OS files

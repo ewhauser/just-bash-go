@@ -55,7 +55,7 @@ The runtime is optimized for LLM and agent workloads:
 - implement full GNU Bash behavior
 - provide job control, shell history, readline-style editing, or host TTY emulation
 - support host subprocess passthrough
-- support a compatibility mode
+- support a user-facing compatibility mode as part of the default runtime contract
 - default to the host filesystem
 - silently emulate missing commands with host binaries
 - optimize for human shell convenience over agent determinism
@@ -126,6 +126,13 @@ The CLI also provides a minimal interactive shell mode. That mode is a front-end
 - it uses `syntax.Parser.InteractiveSeq` to gather complete interactive statements and continuation prompts
 - it executes each completed entry via `Session.Exec`
 - it carries forward the virtual cwd and shell-visible variable state between entries at the CLI layer
+
+The CLI also exposes a developer-only compatibility path for external test harnesses:
+
+- `jbgo compat exec <utility> [args...]` runs one registered utility directly instead of reading a shell script from stdin
+- multicall invocation through `argv[0]` is supported so symlinked names like `ls` or `printf` can dispatch to the same path
+- this mode is CLI-only and opt-in; it is not the default library/runtime contract
+- it uses a host-backed filesystem view and host environment specifically so external suites such as GNU coreutils tests can treat `jbgo` like a utility binary
 
 ### 6.1 Session model
 
@@ -459,7 +466,7 @@ Important properties:
 - the default backend is in-memory
 - the default backend exposes a Unix-like virtual layout rooted at `/`
 - host-backed filesystems, if ever added, must still satisfy policy checks and must never imply host command execution
-- developer-only test harnesses may use a host-backed filesystem adapter, but that adapter is not the default runtime backend and does not change the no-host-command-execution rule
+- developer-only CLI compatibility runs may use a host-backed filesystem adapter, but that adapter is not the default runtime backend and is only for opt-in test harnesses
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
@@ -605,9 +612,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 - `printf` supports the core shell format verbs used by automation scripts, including `%b` escape decoding and `\c` early termination
 - `rg` supports recursive regex search with `-n`, `-i`, `-l`, `-c`, `-g`, `--hidden`, and `--files`
 - `awk` is backed by `goawk` and supports `-F`, `-v`, and `-f`, but keeps `system()`, shell pipes, file writes, and extra file reads disabled inside the sandbox
-- `cut` supports character and field selection, custom delimiters, suppressing non-delimited lines, and `--only-delimited`
 - `comm` supports two-input comparisons plus column suppression via `-1`, `-2`, and `-3`
-- `uniq` supports adjacent-run filtering plus counts, duplicate-only / unique-only modes, and `-i/--ignore-case`
 - `paste` supports parallel and serial modes via `-s` and `-d`, including repeated `-` stdin inputs
 - `tr` supports translate, delete, squeeze, complement, ranges, escapes, and a focused set of POSIX character classes
 - `rev` and `tac` support Unicode-safe line reversal and reverse-line streaming
@@ -620,7 +625,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 For the shell/process helper batch, the runtime should expose practical, sandbox-owned subsets:
 
 - `tee` supports stdout passthrough, writing one or more files, and `-a` append mode
-- `env` supports `-i/--ignore-environment`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
+- `env` supports `-i`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
 - `printenv` prints either the whole environment or named variables and exits non-zero when a requested variable is missing
 - `true` and `false` exist as explicit virtual commands, while bare shell builtins remain interpreter-owned unless intentionally shadowed
 - `which` supports `-a` and `-s` over the virtual `PATH`
@@ -919,6 +924,15 @@ As command surface grows, add command-specific fuzz targets and richer seed corp
 - canonicalize trace event ordering for concurrent pipeline stages before comparison, while still keeping exact event-order goldens for simple serial scripts
 
 The compatibility harness should stay curated. It is not a Bash conformance suite, and it should not imply future host-shell fallback.
+
+### 17.6 GNU coreutils compatibility harness
+
+- provide an optional developer command that runs selected GNU coreutils tests against the current `jbgo` binary
+- keep it outside `go test ./...`, `make test`, and the default CI path
+- pin one GNU coreutils release in a committed manifest and fetch that release into a local cache on demand
+- run GNU tests utility-by-utility against symlinked `jbgo` utility names, with unsupported GNU utility names replaced by explicit `127` stubs instead of host fallback
+- keep the harness strict about GNU utility names while still allowing the non-coreutils host tooling that the GNU test framework itself needs
+- skip root-only, controlling-TTY, SELinux, and help/version-only cases in the first cut rather than patching expected utility output
 
 ## 18. Future Roadmap
 

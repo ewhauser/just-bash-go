@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 )
@@ -18,38 +19,73 @@ func (c *Basename) Name() string {
 }
 
 func (c *Basename) Run(_ context.Context, inv *Invocation) error {
-	args := inv.Args
+	args := append([]string(nil), inv.Args...)
 	multiple := false
 	suffix := ""
+	terminator := "\n"
 
 	for len(args) > 0 {
+		arg := args[0]
 		switch {
-		case args[0] == "-a" || args[0] == "--multiple":
+		case arg == "--":
+			args = args[1:]
+			goto operands
+		case arg == "--multiple":
 			multiple = true
 			args = args[1:]
-		case args[0] == "-s":
-			if len(args) < 2 {
-				return exitf(inv, 1, "basename: option requires an argument -- s")
-			}
-			suffix = args[1]
-			multiple = true
-			args = args[2:]
-		case args[0] == "--suffix":
+		case arg == "--zero":
+			terminator = "\x00"
+			args = args[1:]
+		case arg == "--help":
+			_, _ = io.WriteString(inv.Stdout, basenameHelpText)
+			return nil
+		case arg == "--version":
+			_, _ = io.WriteString(inv.Stdout, basenameVersionText)
+			return nil
+		case arg == "--suffix":
 			if len(args) < 2 {
 				return exitf(inv, 1, "basename: option requires an argument -- suffix")
 			}
 			suffix = args[1]
 			multiple = true
 			args = args[2:]
-		case strings.HasPrefix(args[0], "--suffix="):
-			suffix = strings.TrimPrefix(args[0], "--suffix=")
+		case strings.HasPrefix(arg, "--suffix="):
+			suffix = strings.TrimPrefix(arg, "--suffix=")
 			multiple = true
 			args = args[1:]
-		case args[0] == "--":
-			args = args[1:]
+		case arg == "-":
 			goto operands
-		case strings.HasPrefix(args[0], "-"):
-			return exitf(inv, 1, "basename: unsupported flag %s", args[0])
+		case strings.HasPrefix(arg, "-"):
+			rest := arg[1:]
+			if rest == "" {
+				goto operands
+			}
+			args = args[1:]
+			for rest != "" {
+				switch rest[0] {
+				case 'a':
+					multiple = true
+					rest = rest[1:]
+				case 'z':
+					terminator = "\x00"
+					rest = rest[1:]
+				case 's':
+					multiple = true
+					if len(rest) > 1 {
+						suffix = rest[1:]
+						rest = ""
+						break
+					}
+					if len(args) == 0 {
+						return exitf(inv, 1, "basename: option requires an argument -- s")
+					}
+					suffix = args[0]
+					args = args[1:]
+					rest = ""
+				default:
+					return exitf(inv, 1, "basename: unsupported flag -%c", rest[0])
+				}
+			}
 		default:
 			goto operands
 		}
@@ -57,10 +93,10 @@ func (c *Basename) Run(_ context.Context, inv *Invocation) error {
 
 operands:
 	if len(args) == 0 {
-		return exitf(inv, 1, "basename: missing operand")
+		return exitf(inv, 1, "basename: missing operand\nTry 'basename --help' for more information.")
 	}
 	if !multiple && len(args) > 2 {
-		return exitf(inv, 1, "basename: extra operand %q", args[2])
+		return exitf(inv, 1, "basename: extra operand %s\nTry 'basename --help' for more information.", quoteGNUOperand(args[2]))
 	}
 	if !multiple && len(args) == 2 && suffix == "" {
 		suffix = args[1]
@@ -69,10 +105,10 @@ operands:
 
 	for _, operand := range args {
 		base := basename(operand)
-		if suffix != "" && strings.HasSuffix(base, suffix) {
+		if shouldStripBasenameSuffix(base, suffix) {
 			base = strings.TrimSuffix(base, suffix)
 		}
-		if _, err := fmt.Fprintln(inv.Stdout, base); err != nil {
+		if _, err := fmt.Fprint(inv.Stdout, base, terminator); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
@@ -89,5 +125,20 @@ func basename(name string) string {
 	}
 	return path.Base(cleaned)
 }
+
+func shouldStripBasenameSuffix(base, suffix string) bool {
+	return suffix != "" && base != suffix && strings.HasSuffix(base, suffix)
+}
+
+func quoteGNUOperand(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+const basenameHelpText = `Usage: basename NAME [SUFFIX]
+  or:  basename OPTION... NAME...
+Print NAME with any leading directory components removed.
+`
+
+const basenameVersionText = "basename (jbgo) dev\n"
 
 var _ Command = (*Basename)(nil)

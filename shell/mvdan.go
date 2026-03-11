@@ -30,21 +30,22 @@ type Engine interface {
 }
 
 type Execution struct {
-	Name     string
-	Script   string
-	Program  *syntax.File
-	Args     []string
-	Env      map[string]string
-	Dir      string
-	Stdin    io.Reader
-	Stdout   io.Writer
-	Stderr   io.Writer
-	FS       jbfs.FileSystem
-	Network  network.Client
-	Registry commands.CommandRegistry
-	Policy   policy.Policy
-	Trace    trace.Recorder
-	Exec     func(context.Context, *commands.ExecutionRequest) (*commands.ExecutionResult, error)
+	Name              string
+	Script            string
+	Program           *syntax.File
+	Args              []string
+	Env               map[string]string
+	Dir               string
+	BuiltinCommandDir string
+	Stdin             io.Reader
+	Stdout            io.Writer
+	Stderr            io.Writer
+	FS                jbfs.FileSystem
+	Network           network.Client
+	Registry          commands.CommandRegistry
+	Policy            policy.Policy
+	Trace             trace.Recorder
+	Exec              func(context.Context, *commands.ExecutionRequest) (*commands.ExecutionResult, error)
 }
 
 type RunResult struct {
@@ -281,7 +282,7 @@ func (m *MVdan) callHandler(exec *Execution, budget *executionBudget) interp.Cal
 			if _, ok := exec.Registry.Lookup(args[0]); ok {
 				rewritten := make([]string, len(args))
 				copy(rewritten[1:], args[1:])
-				rewritten[0] = path.Join("/bin", args[0])
+				rewritten[0] = path.Join(builtinCommandDir(exec), args[0])
 				return rewritten, nil
 			}
 		}
@@ -304,6 +305,13 @@ func shouldRewriteBuiltin(name string) bool {
 	default:
 		return true
 	}
+}
+
+func builtinCommandDir(exec *Execution) string {
+	if exec == nil || strings.TrimSpace(exec.BuiltinCommandDir) == "" {
+		return "/bin"
+	}
+	return jbfs.Clean(exec.BuiltinCommandDir)
 }
 
 func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.ExecHandlerFunc {

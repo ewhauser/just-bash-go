@@ -1,4 +1,4 @@
-.PHONY: lint test build fuzz bench-smoke bench-full release-check release-snapshot
+.PHONY: lint test build fuzz bench-smoke bench-full gnu-test gnu-test-setup release-check release-snapshot
 
 GO_PACKAGES := ./... ./examples/...
 
@@ -9,6 +9,8 @@ BENCH_SMOKE_TIME ?= 100ms
 BENCH_FULL_COUNT ?= 10
 BENCH_FULL_TIME ?= 200ms
 BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandRGRecursive|CommandJQTransform)$$
+GNU_CACHE_DIR ?= .cache/gnu
+GNU_JBGO_BIN ?= $(GNU_CACHE_DIR)/bin/jbgo
 
 lint:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -65,6 +67,15 @@ bench-smoke:
 
 bench-full:
 	@go test ./runtime -run=^$$ -bench . -benchmem -count=$(BENCH_FULL_COUNT) -benchtime=$(BENCH_FULL_TIME)
+
+gnu-test-setup:
+	mkdir -p $(GNU_CACHE_DIR)/bin
+	go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --setup
+
+gnu-test:
+	mkdir -p $(GNU_CACHE_DIR)/bin
+	go build -o $(GNU_JBGO_BIN) ./cmd/jbgo
+	GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --jbgo-bin $(GNU_JBGO_BIN)
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check

@@ -7,7 +7,7 @@ It ports the core product idea behind [Vercel's `just-bash`](https://github.com/
 Key properties:
 
 - no host subprocess fallback
-- no compatibility mode
+- no default compatibility mode
 - virtual filesystem by default
 - explicit Go command registry
 - policy-controlled execution
@@ -239,6 +239,14 @@ The CLI can also report embedded release metadata:
 jbgo --version
 ```
 
+For developer-only utility execution, the CLI also exposes an opt-in compatibility path:
+
+```bash
+jbgo compat exec printf '%s\n' hello
+```
+
+That path is intentionally separate from the default sandbox script and REPL modes. It exists so external compatibility harnesses can invoke one registered utility at a time against the host filesystem and host environment.
+
 ### Workspace Example
 
 The repository includes an `examples/` Go module so integration demos can carry their own dependencies without adding them to the root library module.
@@ -251,7 +259,6 @@ go run ./examples/openai-tool-call
 ```
 
 The example hardcodes `gpt-4.1-mini` and asks the model to run a simple `printf` command through the `bash` tool, then print only the tool's stdout.
-
 ## Configuration
 
 The main configuration surface is `runtime.Config`.
@@ -363,7 +370,8 @@ If you are changing runtime boundaries, command ownership, or sandbox behavior, 
 
 - The shell only sees the filesystem and runtime configuration you provide.
 - Command execution is registry-backed. Unknown commands never execute host binaries.
-- There is no host shell fallback and no compatibility mode.
+- There is no host shell fallback.
+- There is no default runtime compatibility mode. The CLI-only `compat exec` path is a developer tool for external test harnesses and is not the default execution contract.
 - Network access is off by default. When enabled, requests are constrained by allowlists and runtime limits.
 - The default static policy applies execution budgets such as command-count, loop-iteration, glob-expansion, substitution-depth, and stdout/stderr capture limits.
 - Trace events capture command execution, file access and mutation, and policy denials for debugging and agent orchestration.
@@ -426,6 +434,27 @@ Common commands from the repo root:
 - `go run ./examples/openai-tool-call`
 
 For architecture and product-boundary work, read [`SPEC.md`](./SPEC.md) before making changes.
+
+The GNU coreutils compatibility harness is intentionally optional and not part of `make test` or `go test ./...`.
+
+Prepare the pinned GNU source tree:
+
+```bash
+make gnu-test-setup
+```
+
+Run the full configured harness or limit it to selected utilities:
+
+```bash
+make gnu-test
+make gnu-test GNU_UTILS="printf pwd"
+```
+
+Useful overrides:
+
+- `GNU_UTILS` limits the utility list.
+- `GNU_TESTS` runs exact GNU test files instead of the manifest-selected utility suites.
+- `GNU_KEEP_WORKDIR=1` preserves the temporary patched/build workdir.
 
 ## License
 
