@@ -514,8 +514,8 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `uniq`
 
-- [ ] `--ignore-case`
-- [ ] `-i`
+- [x] `--ignore-case`
+- [x] `-i`
 
 #### `xargs`
 

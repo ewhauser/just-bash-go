@@ -185,6 +185,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 			fuzzVariant("", "path.read", "{path.sorted}"),
 			fuzzVariant("", "flag:c", "-c", "{path.sorted}"),
 			fuzzVariant("", "flag:d", "-d", "{path.sorted}"),
+			fuzzVariant("", "flag:i", "--ignore-case", "{path.sorted}"),
 		),
 		fuzzSpec("cut", "text",
 			fuzzVariant("", "flag:c", "-c", "1-3", "{path.text}"),
