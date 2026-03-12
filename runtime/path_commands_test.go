@@ -121,6 +121,18 @@ func TestLNHardLinkSharesContent(t *testing.T) {
 	}
 }
 
+func TestLNAcceptsGroupedShortSymlinkFlags(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "ln -s target1 /home/agent/link\nln -nsf target2 /home/agent/link\nreadlink /home/agent/link\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "target2\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestLinkHardLinkSharesContent(t *testing.T) {
 	session := newSession(t, &Config{})
 
@@ -316,6 +328,38 @@ func TestBasenameAndDirnameHandleSuffixesAndMultipleOperands(t *testing.T) {
 	}
 	if got, want := result.Stdout, "a\nb\n/tmp\n.\n/\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDirnameMatchesGNUStringSemanticsAndZeroTerminator(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "dirname '///a///b' '///a//b/' 'foo/.'\ndirname -z '///a///b' ''\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "///a\n///a\nfoo\n///a\x00.\x00"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDirnameMissingOperandIncludesHelpHint(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "dirname\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+	}
+	if got, want := result.Stderr, "dirname: missing operand\nTry 'dirname --help' for more information.\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 
