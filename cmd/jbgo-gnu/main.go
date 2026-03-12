@@ -238,6 +238,10 @@ func run(ctx context.Context, mf *manifest, opts *options) error {
 	if err := prepareProgramDir(workDir, jbgoBin, programs, supportedSet); err != nil {
 		return err
 	}
+	configShell, err := compatConfigShellPath(workDir)
+	if err != nil {
+		return err
+	}
 	if err := disableCheckRebuild(workDir); err != nil {
 		return err
 	}
@@ -267,7 +271,7 @@ func run(ctx context.Context, mf *manifest, opts *options) error {
 
 		logFile := utility.Name + ".log"
 		logPath := filepath.Join(resultsDir, logFile)
-		makeCheckResult, err := runMakeCheck(ctx, makeBin, workDir, tests, logPath)
+		makeCheckResult, err := runMakeCheck(ctx, makeBin, workDir, configShell, tests, logPath)
 		if err != nil {
 			return err
 		}
@@ -446,6 +450,11 @@ func prepareProgramDir(workDir, jbgoBin string, programs []string, supported map
 	if err := compatshims.WriteUnsupportedStubs(srcDir, unsupportedNames); err != nil {
 		return err
 	}
+	helperShells := compatHelperShells(supported)
+	if err := compatshims.SymlinkCommands(srcDir, jbgoBin, helperShells); err != nil {
+		return err
+	}
+	supportedNames = appendUniqueStrings(supportedNames, helperShells...)
 	if _, ok := supported["install"]; ok {
 		supportedNames = append(supportedNames, "ginstall")
 		if err := compatshims.SymlinkCommands(srcDir, jbgoBin, []string{"ginstall"}); err != nil {
@@ -461,6 +470,39 @@ func prepareProgramDir(workDir, jbgoBin string, programs []string, supported map
 		return err
 	}
 	return nil
+}
+
+func compatHelperShells(supported map[string]struct{}) []string {
+	names := make([]string, 0, 2)
+	for _, name := range []string{"bash", "sh"} {
+		if _, ok := supported[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func appendUniqueStrings(items []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(items)+len(values))
+	for _, item := range items {
+		seen[item] = struct{}{}
+	}
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		items = append(items, value)
+	}
+	return items
+}
+
+func compatConfigShellPath(workDir string) (string, error) {
+	path := filepath.Join(workDir, "src", "bash")
+	if err := ensureExecutable(path); err != nil {
+		return "", fmt.Errorf("prepare compat config shell: %w", err)
+	}
+	return path, nil
 }
 
 func implementedGNUProgramSet() map[string]struct{} {
@@ -667,7 +709,7 @@ func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []
 	}
 }
 
-func runMakeCheck(ctx context.Context, makeBin, workDir string, tests []string, logPath string) (makeCheckResult, error) {
+func runMakeCheck(ctx context.Context, makeBin, workDir, configShell string, tests []string, logPath string) (makeCheckResult, error) {
 	args := []string{
 		"check",
 		"SUBDIRS=.",
@@ -679,6 +721,7 @@ func runMakeCheck(ctx context.Context, makeBin, workDir string, tests []string, 
 	}
 	cmd := exec.CommandContext(ctx, makeBin, args...)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "CONFIG_SHELL="+configShell)
 	output, err := cmd.CombinedOutput()
 	if writeErr := os.WriteFile(logPath, output, 0o644); writeErr != nil {
 		return makeCheckResult{}, writeErr

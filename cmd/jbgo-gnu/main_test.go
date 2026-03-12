@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -262,6 +263,69 @@ func TestPrepareResultsDirExplicitClearsOldContents(t *testing.T) {
 	}
 	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
 		t.Fatalf("stale file still present, err = %v", err)
+	}
+}
+
+func TestRunMakeCheckExportsConfigShell(t *testing.T) {
+	workDir := t.TempDir()
+	makeBin := filepath.Join(workDir, "fake-make.sh")
+	envPath := filepath.Join(workDir, "config-shell.txt")
+	logPath := filepath.Join(workDir, "make.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$CONFIG_SHELL\" > " + shellSingleQuoteForScript(envPath) + "\nprintf 'PASS: tests/misc/example.sh\\n'\n"
+	if err := os.WriteFile(makeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake make) error = %v", err)
+	}
+	configShell := "/tmp/jbgo-bash"
+
+	result, err := runMakeCheck(context.Background(), makeBin, workDir, configShell, []string{"tests/misc/example.sh"}, logPath)
+	if err != nil {
+		t.Fatalf("runMakeCheck() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("runMakeCheck() exit = %d, want 0", result.ExitCode)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("ReadFile(config shell) error = %v", err)
+	}
+	if got := string(data); got != configShell+"\n" {
+		t.Fatalf("CONFIG_SHELL = %q, want %q", got, configShell+"\\n")
+	}
+}
+
+func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
+	workDir := t.TempDir()
+	srcDir := filepath.Join(workDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(srcDir) error = %v", err)
+	}
+	makefile := "check-am: all-am\nTESTS_ENVIRONMENT = \\\n  env PATH=\"$(abs_top_builddir)/src:$$PATH\" \\\n"
+	if err := os.WriteFile(filepath.Join(workDir, "Makefile"), []byte(makefile), 0o644); err != nil {
+		t.Fatalf("WriteFile(Makefile) error = %v", err)
+	}
+	jbgoBin := filepath.Join(workDir, "jbgo")
+	if err := os.WriteFile(jbgoBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(jbgoBin) error = %v", err)
+	}
+
+	err := prepareProgramDir(workDir, jbgoBin, []string{"sort"}, map[string]struct{}{
+		"bash": {},
+		"sh":   {},
+		"sort": {},
+	})
+	if err != nil {
+		t.Fatalf("prepareProgramDir() error = %v", err)
+	}
+
+	for _, name := range []string{"bash", "sh"} {
+		path := filepath.Join(srcDir, name)
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("Lstat(%q) error = %v", path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%q is not a symlink", path)
+		}
 	}
 }
 

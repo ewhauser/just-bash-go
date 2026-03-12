@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 type TR struct{}
@@ -16,9 +15,9 @@ type trOptions struct {
 }
 
 type trSet struct {
-	ordered []rune
-	index   map[rune]int
-	present map[rune]bool
+	ordered []byte
+	index   map[byte]int
+	present [256]bool
 }
 
 func NewTR() *TR {
@@ -48,25 +47,24 @@ func (c *TR) Run(_ context.Context, inv *Invocation) error {
 	if err != nil {
 		return err
 	}
-	var out []rune
+	out := make([]byte, 0, len(data))
 	var (
-		lastOut rune
+		lastOut byte
 		hasLast bool
 	)
-	squeezeMembership := chooseTRSqueezeMembership(opts, set1, set2)
-	replacementFallback := rune(0)
+	squeezeMembership := chooseTRSqueezeMembership(opts, &set1, &set2)
+	replacementFallback := byte(0)
 	if len(set2.ordered) > 0 {
 		replacementFallback = set2.ordered[len(set2.ordered)-1]
 	}
 
-	for _, r := range string(data) {
-		matched := set1.contains(r)
+	for _, current := range data {
+		matched := set1.contains(current)
 		if opts.complement {
 			matched = !matched
 		}
 
 		emit := true
-		current := r
 		switch {
 		case opts.delete && matched:
 			emit = false
@@ -74,7 +72,7 @@ func (c *TR) Run(_ context.Context, inv *Invocation) error {
 			if opts.complement {
 				current = replacementFallback
 			} else {
-				current = set2.translate(set1, r)
+				current = set2.translate(&set1, current)
 			}
 		}
 
@@ -89,7 +87,7 @@ func (c *TR) Run(_ context.Context, inv *Invocation) error {
 		hasLast = true
 	}
 
-	if _, err := fmt.Fprint(inv.Stdout, string(out)); err != nil {
+	if _, err := inv.Stdout.Write(out); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
 	return nil
@@ -162,40 +160,39 @@ func parseTRArgs(inv *Invocation) (opts trOptions, set1, set2 string, err error)
 
 func parseTRSet(value string) (trSet, error) {
 	set := trSet{
-		index:   make(map[rune]int),
-		present: make(map[rune]bool),
+		index: make(map[byte]int),
 	}
 	if value == "" {
 		return set, nil
 	}
-	runes := []rune(value)
-	for i := 0; i < len(runes); {
-		if runes[i] == '[' && i+1 < len(runes) && runes[i+1] == ':' {
+	data := []byte(value)
+	for i := 0; i < len(data); {
+		if data[i] == '[' && i+1 < len(data) && data[i+1] == ':' {
 			end := i + 2
-			for end+1 < len(runes) && (runes[end] != ':' || runes[end+1] != ']') {
+			for end+1 < len(data) && (data[end] != ':' || data[end+1] != ']') {
 				end++
 			}
-			if end+1 >= len(runes) {
+			if end+1 >= len(data) {
 				return trSet{}, fmt.Errorf("invalid character class %q", value[i:])
 			}
-			classRunes, err := trClassRunes(string(runes[i+2 : end]))
+			classBytes, err := trClassBytes(string(data[i+2 : end]))
 			if err != nil {
 				return trSet{}, err
 			}
-			for _, r := range classRunes {
-				set.append(r)
+			for _, b := range classBytes {
+				set.append(b)
 			}
 			i = end + 2
 			continue
 		}
 
-		left, advance, err := parseTRRune(runes, i)
+		left, advance, err := parseTRByte(data, i)
 		if err != nil {
 			return trSet{}, err
 		}
 		next := i + advance
-		if next+1 < len(runes) && runes[next] == '-' {
-			right, rightAdvance, err := parseTRRune(runes, next+1)
+		if next+1 < len(data) && data[next] == '-' {
+			right, rightAdvance, err := parseTRByte(data, next+1)
 			if err == nil && left <= right {
 				for current := left; current <= right; current++ {
 					set.append(current)
@@ -210,14 +207,14 @@ func parseTRSet(value string) (trSet, error) {
 	return set, nil
 }
 
-func parseTRRune(runes []rune, index int) (value rune, advance int, err error) {
-	if runes[index] != '\\' {
-		return runes[index], 1, nil
+func parseTRByte(data []byte, index int) (value byte, advance int, err error) {
+	if data[index] != '\\' {
+		return data[index], 1, nil
 	}
-	if index+1 >= len(runes) {
+	if index+1 >= len(data) {
 		return '\\', 1, nil
 	}
-	switch runes[index+1] {
+	switch data[index+1] {
 	case 'n':
 		return '\n', 2, nil
 	case 'r':
@@ -226,38 +223,68 @@ func parseTRRune(runes []rune, index int) (value rune, advance int, err error) {
 		return '\t', 2, nil
 	case '\\':
 		return '\\', 2, nil
+	case '0':
+		end := index + 2
+		for end < len(data) && end < index+5 && isOctalDigit(data[end]) {
+			end++
+		}
+		value, err := parseOctalByte(data[index+1 : end])
+		return value, end - index, err
 	default:
-		return runes[index+1], 2, nil
+		if isOctalDigit(data[index+1]) {
+			end := index + 1
+			for end < len(data) && end < index+4 && isOctalDigit(data[end]) {
+				end++
+			}
+			value, err := parseOctalByte(data[index+1 : end])
+			return value, end - index, err
+		}
+		return data[index+1], 2, nil
 	}
 }
 
-func trClassRunes(name string) ([]rune, error) {
-	var out []rune
-	for r := rune(0); r <= unicode.MaxASCII; r++ {
+func parseOctalByte(data []byte) (byte, error) {
+	var value byte
+	for _, b := range data {
+		if !isOctalDigit(b) {
+			return 0, fmt.Errorf("invalid octal escape")
+		}
+		value = (value * 8) + (b - '0')
+	}
+	return value, nil
+}
+
+func isOctalDigit(b byte) bool {
+	return b >= '0' && b <= '7'
+}
+
+func trClassBytes(name string) ([]byte, error) {
+	var out []byte
+	for b := 0; b <= 0x7f; b++ {
 		switch name {
 		case "alnum":
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				out = append(out, r)
+			if isASCIIAlpha(byte(b)) || isASCIIDigit(byte(b)) {
+				out = append(out, byte(b))
 			}
 		case "alpha":
-			if unicode.IsLetter(r) {
-				out = append(out, r)
+			if isASCIIAlpha(byte(b)) {
+				out = append(out, byte(b))
 			}
 		case "digit":
-			if unicode.IsDigit(r) {
-				out = append(out, r)
+			if isASCIIDigit(byte(b)) {
+				out = append(out, byte(b))
 			}
 		case "lower":
-			if unicode.IsLower(r) {
-				out = append(out, r)
+			if b >= 'a' && b <= 'z' {
+				out = append(out, byte(b))
 			}
 		case "space":
-			if unicode.IsSpace(r) {
-				out = append(out, r)
+			if isASCIISpace(byte(b)) {
+				out = append(out, byte(b))
 			}
 		case "upper":
-			if unicode.IsUpper(r) {
-				out = append(out, r)
+			if b >= 'A' && b <= 'Z' {
+				out = append(out, byte(b))
 			}
 		default:
 			return nil, fmt.Errorf("unsupported character class %q", name)
@@ -266,23 +293,40 @@ func trClassRunes(name string) ([]rune, error) {
 	return out, nil
 }
 
-func (s *trSet) append(r rune) {
-	if _, exists := s.index[r]; !exists {
-		s.index[r] = len(s.ordered)
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func isASCIISpace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '\v', '\f':
+		return true
+	default:
+		return false
 	}
-	s.ordered = append(s.ordered, r)
-	s.present[r] = true
 }
 
-func (s trSet) contains(r rune) bool {
-	return s.present[r]
+func (s *trSet) append(b byte) {
+	if _, exists := s.index[b]; !exists {
+		s.index[b] = len(s.ordered)
+	}
+	s.ordered = append(s.ordered, b)
+	s.present[b] = true
 }
 
-func (s trSet) translate(source trSet, r rune) rune {
+func (s *trSet) contains(b byte) bool {
+	return s.present[b]
+}
+
+func (s *trSet) translate(source *trSet, b byte) byte {
 	if len(s.ordered) == 0 {
-		return r
+		return b
 	}
-	position, ok := source.index[r]
+	position, ok := source.index[b]
 	if !ok {
 		return s.ordered[len(s.ordered)-1]
 	}
@@ -292,7 +336,7 @@ func (s trSet) translate(source trSet, r rune) rune {
 	return s.ordered[position]
 }
 
-func chooseTRSqueezeMembership(opts trOptions, set1, set2 trSet) func(rune) bool {
+func chooseTRSqueezeMembership(opts trOptions, set1, set2 *trSet) func(byte) bool {
 	switch {
 	case opts.squeeze && len(set2.ordered) > 0 && !opts.delete:
 		return set2.contains
