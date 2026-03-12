@@ -669,6 +669,7 @@ For the shell/process helper batch, the runtime should expose practical, sandbox
 - `tee` supports stdout passthrough, writing one or more files, and `-a` append mode
 - `env` supports `-i`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
 - `id` reports a deterministic virtual sandbox identity instead of consulting the host passwd/group database, supports the GNU/BSD-compatible option surface used by uutils (`-a`, `-A`, `-u`, `-g`, `-G`, `-n`, `-r`, `-z`, `-Z`, `-p`, `-P`), and treats audit or security-context output as sandbox-owned compatibility behavior rather than host state
+- `whoami` reports the deterministic virtual effective username derived from the sandbox identity environment, matching `id -un` instead of consulting host account databases
 - `printenv` prints either the whole environment or named variables and exits non-zero when a requested variable is missing
 - `test` and `[` support argv-only GNU-style predicate evaluation over strings, integers, file metadata, `!`, `-a`, `-o`, and parenthesized expressions, while mapping ownership and special-file predicates onto deterministic sandbox behavior when host metadata is unavailable
 - `true` and `false` exist as explicit virtual commands, while bare shell builtins remain interpreter-owned unless intentionally shadowed
