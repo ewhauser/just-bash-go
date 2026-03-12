@@ -13,8 +13,6 @@ import (
 	"github.com/ewhauser/gbash/internal/compatshims"
 )
 
-const legacyTestsEnvironmentHook = "  $(SHELL) '$(abs_top_builddir)/build-aux/jbgo-harness/relink.sh' '$(abs_top_builddir)/src' || exit $$?; \\\n"
-
 func listGNUPrograms(ctx context.Context, workDir string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, filepath.Join(workDir, "build-aux", "gen-lists-of-programs.sh"), "--list-progs")
 	cmd.Dir = workDir
@@ -64,7 +62,7 @@ func prepareProgramDir(workDir, gbashBin string, programs []string, supported ma
 			return err
 		}
 	}
-	return installTestRelinkHook(workDir, gbashBin, supportedNames, unsupportedNames)
+	return writeGNUProgramList(workDir, programs)
 }
 
 func compatHelperShells(supported map[string]struct{}) []string {
@@ -108,6 +106,14 @@ func implementedGNUProgramSet() map[string]struct{} {
 	return supported
 }
 
+func writeGNUProgramList(workDir string, programs []string) error {
+	hookDir := filepath.Join(workDir, "build-aux", "gbash-harness")
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		return err
+	}
+	return writeLines(filepath.Join(hookDir, "gnu-programs.txt"), programs)
+}
+
 func disableCheckRebuild(workDir string) error {
 	makefilePath := filepath.Join(workDir, "Makefile")
 	data, err := os.ReadFile(makefilePath)
@@ -121,33 +127,6 @@ func disableCheckRebuild(workDir string) error {
 	return os.WriteFile(makefilePath, []byte(updated), 0o644)
 }
 
-func installTestRelinkHook(workDir, gbashBin string, supportedNames, unsupportedNames []string) error {
-	hookDir := filepath.Join(workDir, "build-aux", "gbash-harness")
-	_ = os.RemoveAll(filepath.Join(workDir, "build-aux", "jbgo-harness"))
-	if err := os.MkdirAll(hookDir, 0o755); err != nil {
-		return err
-	}
-	if err := writeLines(filepath.Join(hookDir, "supported-programs.txt"), supportedNames); err != nil {
-		return err
-	}
-	if err := writeLines(filepath.Join(hookDir, "unsupported-programs.txt"), unsupportedNames); err != nil {
-		return err
-	}
-
-	scriptPath := filepath.Join(hookDir, "relink.sh")
-	script, err := renderRelinkScript(gbashBin)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
-		return err
-	}
-	if err := patchTestsEnvironment(filepath.Join(workDir, "Makefile")); err != nil {
-		return err
-	}
-	return patchTestInitSetupPath(filepath.Join(workDir, "tests", "init.sh"))
-}
-
 func writeLines(path string, lines []string) error {
 	sorted := append([]string(nil), lines...)
 	sort.Strings(sorted)
@@ -156,62 +135,6 @@ func writeLines(path string, lines []string) error {
 		data += "\n"
 	}
 	return os.WriteFile(path, []byte(data), 0o644)
-}
-
-func patchTestsEnvironment(makefilePath string) error {
-	return applyFilePatch(&filePatch{
-		path:                makefilePath,
-		needle:              "TESTS_ENVIRONMENT = \\\n",
-		replacement:         testsEnvironmentPatch,
-		idempotencyMarker:   "build-aux/gbash-harness/relink.sh",
-		removeBeforeReplace: []string{legacyTestsEnvironmentHook},
-		missingMarkerError:  "patch TESTS_ENVIRONMENT: marker not found",
-	})
-}
-
-func patchTestInitSetupPath(initPath string) error {
-	return applyFilePatch(&filePatch{
-		path:               initPath,
-		needle:             "setup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n",
-		replacement:        testsInitSetupPatch,
-		idempotencyMarker:  "jbgo_path_before_setup_=$PATH",
-		missingMarkerError: "patch tests/init.sh setup PATH: marker not found",
-	})
-}
-
-type filePatch struct {
-	path                string
-	needle              string
-	replacement         string
-	idempotencyMarker   string
-	removeBeforeReplace []string
-	missingMarkerError  string
-}
-
-func applyFilePatch(patch *filePatch) error {
-	data, err := os.ReadFile(patch.path)
-	if err != nil {
-		return err
-	}
-	contents := string(data)
-	updated := contents
-	for _, removal := range patch.removeBeforeReplace {
-		updated = strings.ReplaceAll(updated, removal, "")
-	}
-	if patch.idempotencyMarker != "" && strings.Contains(updated, patch.idempotencyMarker) {
-		if updated == contents {
-			return nil
-		}
-		return os.WriteFile(patch.path, []byte(updated), 0o644)
-	}
-	next := strings.Replace(updated, patch.needle, patch.replacement, 1)
-	if next == updated {
-		return fmt.Errorf("%s", patch.missingMarkerError)
-	}
-	if next == contents {
-		return nil
-	}
-	return os.WriteFile(patch.path, []byte(next), 0o644)
 }
 
 func shellSingleQuoteForScript(value string) string {
