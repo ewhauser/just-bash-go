@@ -939,6 +939,9 @@ func resolveUtilityTests(workDir string, utility utilityManifest, globalSkips []
 			if err != nil || info.IsDir() {
 				continue
 			}
+			if !isRunnableTestFile(rel, info) {
+				continue
+			}
 			tests[rel] = struct{}{}
 		}
 	}
@@ -949,6 +952,17 @@ func resolveUtilityTests(workDir string, utility utilityManifest, globalSkips []
 	sort.Strings(out)
 	sort.Strings(skipped)
 	return out, skipped, nil
+}
+
+func isRunnableTestFile(rel string, info os.FileInfo) bool {
+	switch filepath.Ext(rel) {
+	case ".log", ".trs":
+		return false
+	case ".sh", ".pl", ".xpl":
+		return true
+	default:
+		return info.Mode()&0o111 != 0
+	}
 }
 
 func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []string) (skip bool, reason string, err error) {

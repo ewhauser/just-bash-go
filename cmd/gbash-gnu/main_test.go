@@ -587,13 +587,39 @@ func TestResolveUtilityTestsAppliesPatternAndSkipFilters(t *testing.T) {
 	}
 }
 
+func TestResolveUtilityTestsSkipsGeneratedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "tests/seq/seq-precision.sh", "#!/bin/sh\n")
+	writeTestFile(t, root, "tests/seq/seq-precision.log", "generated\n")
+	writeTestFile(t, root, "tests/seq/seq-precision.trs", "generated\n")
+
+	tests, skipped, err := resolveUtilityTests(root, utilityManifest{
+		Name:     "seq",
+		Patterns: []string{"tests/seq/*"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveUtilityTests() error = %v", err)
+	}
+	if got, want := tests, []string{"tests/seq/seq-precision.sh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tests = %#v, want %#v", got, want)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want no skipped entries", skipped)
+	}
+}
+
 func writeTestFile(t *testing.T, root, rel, contents string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", path, err)
 	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	switch filepath.Ext(path) {
+	case ".sh", ".pl", ".xpl":
+		mode = 0o755
+	}
+	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 }
