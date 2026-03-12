@@ -90,12 +90,22 @@ func TestSeqErrorsOnMissingOperandZeroIncrementAndInvalidNumbers(t *testing.T) {
 		{
 			name:       "zero increment",
 			script:     "seq 10 0 32\n",
-			wantStderr: "seq: invalid Zero increment value: \"0\"",
+			wantStderr: "seq: invalid Zero increment value: '0'",
 		},
 		{
 			name:       "invalid number",
 			script:     "seq NaN\n",
-			wantStderr: "seq: invalid 'not-a-number' argument: \"NaN\"",
+			wantStderr: "seq: invalid 'not-a-number' argument: 'NaN'",
+		},
+		{
+			name:       "empty format",
+			script:     "seq -f '' 1\n",
+			wantStderr: "seq: format '' has no % directive",
+		},
+		{
+			name:       "too many format directives",
+			script:     "seq -f '%g%' 1\n",
+			wantStderr: "seq: format '%g%' has too many % directives",
 		},
 	}
 
