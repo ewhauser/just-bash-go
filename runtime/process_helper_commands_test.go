@@ -250,7 +250,8 @@ func TestUptimeReadsBootTimeAndUsersFromUtmpFile(t *testing.T) {
 	if !defaultPattern.MatchString(lines[0]) {
 		t.Fatalf("first line = %q, want parsed utmp output", lines[0])
 	}
-	if got, want := lines[1], "2024-05-22 03:46:41"; got != want {
+	wantSince := time.Unix(1716371201, 0).UTC().Local().Format("2006-01-02 15:04:05")
+	if got, want := lines[1], wantSince; got != want {
 		t.Fatalf("since line = %q, want %q", got, want)
 	}
 }
