@@ -1,4 +1,4 @@
-package commands
+package sqlite3
 
 import (
 	"bytes"
@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"unicode"
@@ -16,8 +19,13 @@ import (
 	_ "github.com/ncruces/go-sqlite3/embed"
 	"github.com/ncruces/go-sqlite3/ext/serdes"
 
-	"github.com/ewhauser/gbash/policy"
+	"github.com/ewhauser/gbash/commands"
+	gbfs "github.com/ewhauser/gbash/fs"
 )
+
+type Command = commands.Command
+type ExitError = commands.ExitError
+type Invocation = commands.Invocation
 
 type sqliteOutputMode string
 
@@ -83,6 +91,13 @@ type SQLite3 struct{}
 
 func NewSQLite3() *SQLite3 {
 	return &SQLite3{}
+}
+
+func Register(registry commands.CommandRegistry) error {
+	if registry == nil {
+		return nil
+	}
+	return registry.Register(NewSQLite3())
 }
 
 func (c *SQLite3) Name() string {
@@ -298,7 +313,7 @@ func resolveSQLiteDatabasePath(ctx context.Context, inv *Invocation, database st
 	if database == ":memory:" {
 		return database, false, nil
 	}
-	info, abs, exists, err := statMaybe(ctx, inv, policy.FileActionStat, database)
+	info, abs, exists, err := statMaybe(ctx, inv, database)
 	if err != nil {
 		return "", false, err
 	}
@@ -320,6 +335,75 @@ func readSQLiteDatabase(ctx context.Context, inv *Invocation, name string) ([]by
 		return nil, &ExitError{Code: 1, Err: err}
 	}
 	return data, nil
+}
+
+func exitf(inv *Invocation, code int, format string, args ...any) error {
+	return commands.Exitf(inv, code, format, args...)
+}
+
+func statMaybe(ctx context.Context, inv *Invocation, name string) (info stdfs.FileInfo, abs string, exists bool, err error) {
+	abs = name
+	if inv != nil && inv.FS != nil {
+		abs = inv.FS.Resolve(name)
+	}
+	info, err = inv.FS.Stat(ctx, abs)
+	if err != nil {
+		if errors.Is(err, stdfs.ErrNotExist) {
+			return nil, abs, false, nil
+		}
+		return nil, "", false, err
+	}
+	return info, abs, true, nil
+}
+
+func openRead(ctx context.Context, inv *Invocation, name string) (gbfs.File, string, error) {
+	abs := name
+	if inv != nil && inv.FS != nil {
+		abs = inv.FS.Resolve(name)
+	}
+	file, err := inv.FS.Open(ctx, abs)
+	if err != nil {
+		return nil, "", err
+	}
+	return file, abs, nil
+}
+
+func ensureParentDirExists(ctx context.Context, inv *Invocation, targetAbs string) error {
+	parent := path.Dir(targetAbs)
+	info, _, exists, err := statMaybe(ctx, inv, parent)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return &ExitError{
+			Code: 1,
+			Err:  fmt.Errorf("%s: No such file or directory", parent),
+		}
+	}
+	if !info.IsDir() {
+		return &ExitError{
+			Code: 1,
+			Err:  fmt.Errorf("%s: Not a directory", parent),
+		}
+	}
+	return nil
+}
+
+func writeFileContents(ctx context.Context, inv *Invocation, targetAbs string, data []byte, perm stdfs.FileMode) error {
+	if err := ensureParentDirExists(ctx, inv, targetAbs); err != nil {
+		return err
+	}
+
+	file, err := inv.FS.OpenFile(ctx, targetAbs, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := file.Write(data); err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+	return nil
 }
 
 func configureSQLiteConn(conn *gosqlite.Conn, readonly bool) error {
