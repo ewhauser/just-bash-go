@@ -178,6 +178,7 @@ func DefaultRegistry() *Registry {
 		NewSplit(),
 		NewTac(),
 		NewDiff(),
+		NewOD(),
 		NewSeq(),
 		NewBase32(),
 		NewBase64(),
