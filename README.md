@@ -424,7 +424,7 @@ rt, err := runtime.New(&runtime.Config{Registry: registry})
 
 See [`examples/custom-zstd/main.go`](./examples/custom-zstd/main.go) for a runnable example that adds a `zstd` command. Run it with `cd examples && make run-custom-zstd`.
 
-To opt into contrib commands such as `sqlite3` and `yq`:
+To opt into contrib commands such as `sqlite3`, `jq`, and `yq`:
 
 ```go
 package main
@@ -433,6 +433,7 @@ import (
 	"context"
 
 	"github.com/ewhauser/gbash/commands"
+	contribjq "github.com/ewhauser/gbash/contrib/jq"
 	contribsqlite3 "github.com/ewhauser/gbash/contrib/sqlite3"
 	contribyq "github.com/ewhauser/gbash/contrib/yq"
 	gbruntime "github.com/ewhauser/gbash/runtime"
@@ -440,6 +441,9 @@ import (
 
 func main() {
 	registry := commands.DefaultRegistry()
+	if err := contribjq.Register(registry); err != nil {
+		panic(err)
+	}
 	if err := contribsqlite3.Register(registry); err != nil {
 		panic(err)
 	}
@@ -453,7 +457,9 @@ func main() {
 	}
 
 	_, _ = rt.Run(context.Background(), &gbruntime.ExecutionRequest{
-		Script: "printf 'name: alice\\n' | yq '.name'\n" + `sqlite3 :memory: "select 1;"`,
+		Script: "printf '{\"name\":\"alice\"}\\n' | jq -r '.name'\n" +
+			"printf 'name: alice\\n' | yq '.name'\n" +
+			`sqlite3 :memory: "select 1;"`,
 	})
 }
 ```
@@ -486,7 +492,7 @@ The default registry currently includes the commands listed in [`commands/regist
 
 - File and path: `cat`, `cp`, `mv`, `ln`, `ls`, `mkdir`, `rm`, `rmdir`, `touch`, `chmod`, `readlink`, `stat`, `basename`, `dirname`, `tree`, `du`, `file`, `find`
 - Search and text: `grep`, `rg`, `awk`, `sed`, `cut`, `sort`, `uniq`, `head`, `tail`, `wc`, `printf`, `tee`, `comm`, `paste`, `tr`, `rev`, `nl`, `join`, `split`, `tac`, `diff`, `base64`
-- Archive and data: `tar`, `gzip`, `gunzip`, `zcat`, `jq`
+- Archive and data: `tar`, `gzip`, `gunzip`, `zcat`
 - Environment and execution: `echo`, `pwd`, `env`, `printenv`, `which`, `help`, `true`, `false`, `date`, `sleep`, `timeout`, `xargs`, `bash`, `sh`
 - Network when configured: `curl`
 
@@ -494,12 +500,12 @@ The project targets high-value agent workflows, not full GNU flag parity for eve
 
 `tar`, `gzip`, `gunzip`, and `zcat` are intentionally focused subsets. The current surface covers create/list/extract, gzip-wrapped archives, `-C`, `-k`, `-O`, stdin/stdout flows, and extraction hardening around parent traversal and unsafe symlink targets. Append/update modes and non-gzip codecs are still out of scope.
 
-Optional contrib commands are not part of the default registry. `sqlite3` and `yq` now live in [`contrib/`](./contrib) so the core library stays small and does not pull optional heavyweight dependency chains by default.
+Optional contrib commands are not part of the default registry. `sqlite3`, `jq`, and `yq` live in [`contrib/`](./contrib) so the core library stays small and does not pull optional heavyweight dependency chains by default.
+
+The contrib `jq` command is backed by [`itchyny/gojq`](https://github.com/itchyny/gojq). The current subset supports raw-input mode, file-backed filters, `--arg` and `--argjson`, `--slurpfile` and `--rawfile`, positional argument injection, compact and raw output modes, indentation controls, `--raw-output0`, `--null-input`, `--slurp`, and exit-status handling.
 
 The contrib `sqlite3` command is backed by [`ncruces/go-sqlite3`](https://github.com/ncruces/go-sqlite3) using an in-memory connection plus explicit sandbox filesystem load and writeback. The current subset supports `:memory:` and sandbox file databases, list/CSV/JSON/line/column/table output, `-header`, `-readonly`, `-bail`, `-cmd`, `-echo`, help, and version output. `ATTACH`, `DETACH`, `VACUUM`, virtual-table creation, and `load_extension()` are denied so SQL cannot escape the sandbox filesystem.
-
 The contrib `yq` command is backed by [`mikefarah/yq`](https://github.com/mikefarah/yq)'s `yqlib` evaluator. The current subset supports `eval` / `eval-all`, input and output format selection, null-input document creation, pretty-print rewriting, exit-status handling, scalar-unwrapping controls, NUL-separated output, expression files, and in-place file updates. `yqlib` env and file operators such as `env()` and `load()` stay disabled so expressions cannot bypass sandbox policy.
-
 ## Shell Features
 
 Shell parsing and execution are delegated to `mvdan/sh/v3`, with project-owned filesystem, command, policy, and trace layers around it.
@@ -531,14 +537,17 @@ Those command paths are virtual stubs used for shell resolution. Command impleme
 This repository is a committed Go workspace:
 
 - the root module contains the runtime, CLI, core commands, and tests
+- [`contrib/jq/`](./contrib/jq) is a separate Go module for the optional `jq` command and its JSON/query dependencies
 - [`contrib/sqlite3/`](./contrib/sqlite3) is a separate Go module for the optional `sqlite3` command and its heavier dependencies
 - [`contrib/yq/`](./contrib/yq) is a separate Go module for the optional `yq` command and its YAML/query dependencies
 - [`examples/`](./examples) is a separate Go module for demos and external SDK integrations
 
 Common commands from the repo root:
 
-- `go build ./... ./contrib/sqlite3/... ./contrib/yq/... ./examples/...`
-- `go test ./... ./contrib/sqlite3/... ./contrib/yq/... ./examples/...`
+- `go build ./... ./contrib/sqlite3/... ./contrib/jq/... ./examples/...`
+- `go test ./... ./contrib/sqlite3/... ./contrib/jq/... ./examples/...`
+- `go build ./... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...`
+- `go test ./... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...`
 - `go run ./examples/openai-tool-call`
 - `go run ./examples/adk-bash-chat`
 - `go run ./examples/sqlite-backed-fs --db /tmp/gbash-sandbox.db --script "pwd"`

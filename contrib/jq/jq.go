@@ -1,4 +1,4 @@
-package commands
+package jq
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ewhauser/gbash/commands"
 	"github.com/itchyny/gojq"
 )
 
@@ -49,11 +50,18 @@ func NewJQ() *JQ {
 	return &JQ{}
 }
 
+func Register(registry commands.CommandRegistry) error {
+	if registry == nil {
+		return nil
+	}
+	return registry.Register(NewJQ())
+}
+
 func (c *JQ) Name() string {
 	return "jq"
 }
 
-func (c *JQ) Run(ctx context.Context, inv *Invocation) error {
+func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 	opts, filter, inputs, err := parseJQArgs(inv)
 	if err != nil {
 		return err
@@ -110,15 +118,15 @@ func (c *JQ) Run(ctx context.Context, inv *Invocation) error {
 	if opts.exitStatus {
 		switch {
 		case !hadOutput:
-			return &ExitError{Code: 4}
+			return &commands.ExitError{Code: 4}
 		case lastValue == nil || lastValue == false:
-			return &ExitError{Code: 1}
+			return &commands.ExitError{Code: 1}
 		}
 	}
 	return nil
 }
 
-func parseJQArgs(inv *Invocation) (opts jqOptions, filter string, inputs []string, err error) {
+func parseJQArgs(inv *commands.Invocation) (opts jqOptions, filter string, inputs []string, err error) {
 	args := inv.Args
 	for len(args) > 0 {
 		arg := args[0]
@@ -169,7 +177,7 @@ func parseJQArgs(inv *Invocation) (opts jqOptions, filter string, inputs []strin
 	return opts, filter, inputs, nil
 }
 
-func parseJQLongFlag(inv *Invocation, opts *jqOptions, args []string) ([]string, error) {
+func parseJQLongFlag(inv *commands.Invocation, opts *jqOptions, args []string) ([]string, error) {
 	arg := args[0]
 	name, value, hasValue := splitJQLongFlag(arg)
 
@@ -269,7 +277,7 @@ func parseJQLongFlag(inv *Invocation, opts *jqOptions, args []string) ([]string,
 	return args[1:], nil
 }
 
-func parseJQShortFlags(inv *Invocation, opts *jqOptions, args []string) ([]string, error) {
+func parseJQShortFlags(inv *commands.Invocation, opts *jqOptions, args []string) ([]string, error) {
 	shorts := args[0][1:]
 	for shorts != "" {
 		flag := shorts[0]
@@ -333,7 +341,7 @@ func splitJQLongFlag(arg string) (name, value string, hasValue bool) {
 	return name, "", false
 }
 
-func parseJQIntValue(inv *Invocation, arg, inlineValue string, hasValue bool, rest []string) (parsed int, remaining []string, err error) {
+func parseJQIntValue(inv *commands.Invocation, arg, inlineValue string, hasValue bool, rest []string) (parsed int, remaining []string, err error) {
 	value := inlineValue
 	if !hasValue {
 		if len(rest) == 0 {
@@ -355,14 +363,14 @@ func parseJQIntValue(inv *Invocation, arg, inlineValue string, hasValue bool, re
 	return parsed, rest, nil
 }
 
-func parseJQPairValue(inv *Invocation, arg string, rest []string) (name, value string, remaining []string, err error) {
+func parseJQPairValue(inv *commands.Invocation, arg string, rest []string) (name, value string, remaining []string, err error) {
 	if len(rest) < 2 {
 		return "", "", nil, exitf(inv, 1, "jq: expected 2 arguments for %s", arg)
 	}
 	return rest[0], rest[1], rest[2:], nil
 }
 
-func loadJQFilter(ctx context.Context, inv *Invocation, opts *jqOptions, filter string) (string, error) {
+func loadJQFilter(ctx context.Context, inv *commands.Invocation, opts *jqOptions, filter string) (string, error) {
 	if !opts.fromFile {
 		return filter, nil
 	}
@@ -373,7 +381,7 @@ func loadJQFilter(ctx context.Context, inv *Invocation, opts *jqOptions, filter 
 	return strings.TrimSpace(string(data)), nil
 }
 
-func buildJQVariables(ctx context.Context, inv *Invocation, opts *jqOptions) (names []string, values []any, err error) {
+func buildJQVariables(ctx context.Context, inv *commands.Invocation, opts *jqOptions) (names []string, values []any, err error) {
 	named := make(map[string]any)
 
 	appendVar := func(name string, value any) {
@@ -436,7 +444,7 @@ func buildJQVariables(ctx context.Context, inv *Invocation, opts *jqOptions) (na
 	return names, values, nil
 }
 
-func collectJQInputs(ctx context.Context, inv *Invocation, opts *jqOptions, inputs []string) ([]any, error) {
+func collectJQInputs(ctx context.Context, inv *commands.Invocation, opts *jqOptions, inputs []string) ([]any, error) {
 	if opts.nullInput {
 		return []any{nil}, nil
 	}
@@ -451,7 +459,7 @@ func collectJQInputs(ctx context.Context, inv *Invocation, opts *jqOptions, inpu
 	return collectJSONJQInputs(inv, sources, opts)
 }
 
-func readJQInputSources(ctx context.Context, inv *Invocation, inputs []string) (*jqSources, error) {
+func readJQInputSources(ctx context.Context, inv *commands.Invocation, inputs []string) (*jqSources, error) {
 	if len(inputs) == 0 {
 		data, err := readAllStdin(inv)
 		if err != nil {
@@ -535,7 +543,7 @@ func rawLines(data []byte) []any {
 	return lines
 }
 
-func collectJSONJQInputs(inv *Invocation, sources *jqSources, opts *jqOptions) ([]any, error) {
+func collectJSONJQInputs(inv *commands.Invocation, sources *jqSources, opts *jqOptions) ([]any, error) {
 	if sources == nil {
 		if opts.slurp {
 			return []any{[]any{}}, nil
@@ -557,7 +565,7 @@ func collectJSONJQInputs(inv *Invocation, sources *jqSources, opts *jqOptions) (
 	return values, nil
 }
 
-func readJQFile(ctx context.Context, inv *Invocation, name string) ([]byte, error) {
+func readJQFile(ctx context.Context, inv *commands.Invocation, name string) ([]byte, error) {
 	data, _, err := readAllFile(ctx, inv, name)
 	if err == nil {
 		return data, nil
@@ -608,7 +616,7 @@ func decodeSingleJQJSON(data []byte) (any, error) {
 	return values[0], nil
 }
 
-func runJQQuery(ctx context.Context, inv *Invocation, code *gojq.Code, input any, variableValues []any, opts *jqOptions, hadOutput *bool, lastValue *any) (bool, error) {
+func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, input any, variableValues []any, opts *jqOptions, hadOutput *bool, lastValue *any) (bool, error) {
 	iter := code.RunWithContext(ctx, input, variableValues...)
 	for {
 		value, ok := iter.Next()
@@ -628,19 +636,19 @@ func runJQQuery(ctx context.Context, inv *Invocation, code *gojq.Code, input any
 
 		formatted, err := formatJQValue(value, opts)
 		if err != nil {
-			return false, &ExitError{Code: 5, Err: err}
+			return false, &commands.ExitError{Code: 5, Err: err}
 		}
 		if _, err := inv.Stdout.Write(formatted); err != nil {
-			return false, &ExitError{Code: 1, Err: err}
+			return false, &commands.ExitError{Code: 1, Err: err}
 		}
 		switch {
 		case opts.rawOutput0:
 			if _, err := inv.Stdout.Write([]byte{0x00}); err != nil {
-				return false, &ExitError{Code: 1, Err: err}
+				return false, &commands.ExitError{Code: 1, Err: err}
 			}
 		case !opts.join:
 			if _, err := io.WriteString(inv.Stdout, "\n"); err != nil {
-				return false, &ExitError{Code: 1, Err: err}
+				return false, &commands.ExitError{Code: 1, Err: err}
 			}
 		}
 	}
@@ -748,3 +756,36 @@ Supported options:
 `
 
 const jqVersionText = "jq (gbash) backed by gojq v0.12.18\n"
+
+func exitf(inv *commands.Invocation, code int, format string, args ...any) error {
+	return commands.Exitf(inv, code, format, args...)
+}
+
+func readAllStdin(inv *commands.Invocation) ([]byte, error) {
+	data, err := io.ReadAll(inv.Stdin)
+	if err != nil {
+		return nil, &commands.ExitError{Code: 1, Err: err}
+	}
+	return data, nil
+}
+
+func readAllFile(ctx context.Context, inv *commands.Invocation, name string) (data []byte, abs string, err error) {
+	abs = name
+	if inv != nil && inv.FS != nil {
+		abs = inv.FS.Resolve(name)
+	}
+
+	file, err := inv.FS.Open(ctx, abs)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err = io.ReadAll(file)
+	if err != nil {
+		return nil, "", &commands.ExitError{Code: 1, Err: err}
+	}
+	return data, abs, nil
+}
+
+var _ commands.Command = (*JQ)(nil)

@@ -280,11 +280,14 @@ func FuzzDataCommands(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, rawValue string, rawJSON []byte) {
 		session := newFuzzSession(t, rt)
-		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
+		_ = prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
 
-		script := fmt.Appendf(nil,
-			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\nsha256sum /tmp/input.json >/tmp/sha256-file.txt\ncat /tmp/input.json | sha256sum >/tmp/sha256-stdin.txt\nsha256sum /tmp/input.json >/tmp/checksums.txt\nsha256sum -c /tmp/checksums.txt >/tmp/sha256-check.txt\n",
-			shellQuote(value),
+		script := []byte(
+			"base64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n" +
+				"sha256sum /tmp/input.json >/tmp/sha256-file.txt\n" +
+				"cat /tmp/input.json | sha256sum >/tmp/sha256-stdin.txt\n" +
+				"sha256sum /tmp/input.json >/tmp/checksums.txt\n" +
+				"sha256sum -c /tmp/checksums.txt >/tmp/sha256-check.txt\n",
 		)
 
 		result, err := runFuzzSessionScript(t, session, script)

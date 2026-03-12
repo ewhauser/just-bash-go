@@ -153,8 +153,8 @@ func prepareFuzzFixtures(t *testing.T, session *Session, raw []byte) fuzzFixture
 		"{date.format}":      "+%F",
 		"{duration.short}":   "0.001",
 		"{duration.timeout}": "0.01",
-		"{jq.filter}":        ".value",
-		"{jq.build}":         "{value:$value}",
+		"{yq.filter}":        ".value",
+		"{yq.build}":         ".value = \"generated\"",
 	}
 
 	pairs := make([]string, 0, len(values)*2)
@@ -308,11 +308,11 @@ func generatePipelineScript(t *testing.T, cursor *fuzzCursor, specs []fuzzComman
 			}{{name: "grep", flags: []string{"-n"}}, {name: "wc", flags: []string{"-l"}}},
 		},
 		{
-			template: "cat {path.json} | jq -r {jq.filter} | sed -n {program.sed} || true\n",
+			template: "cat {path.yaml} | yq {yq.filter} | sed -n {program.sed} || true\n",
 			hits: []struct {
 				name  string
 				flags []string
-			}{{name: "jq", flags: []string{"-r"}}, {name: "sed", flags: []string{"-n"}}},
+			}{{name: "yq"}, {name: "sed", flags: []string{"-n"}}},
 		},
 	}
 

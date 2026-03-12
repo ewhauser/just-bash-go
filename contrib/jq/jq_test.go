@@ -1,16 +1,18 @@
-package runtime
+package jq
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	gbruntime "github.com/ewhauser/gbash/runtime"
 )
 
 func TestJQReadsFromStdinWithRawOutput(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `echo '{"name":"test"}' | jq -r '.name'` + "\n",
 	})
 	if err != nil {
@@ -27,7 +29,7 @@ func TestJQReadsFromStdinWithRawOutput(t *testing.T) {
 func TestJQCompactOutputAcrossMultipleFiles(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
+	session := newJQSession(t)
 	setup := mustExecSession(t, session, "echo '{\"id\":1}' > /a.json\n echo '{\"id\":2}' > /b.json\n")
 	if setup.ExitCode != 0 {
 		t.Fatalf("setup ExitCode = %d, want 0", setup.ExitCode)
@@ -45,8 +47,8 @@ func TestJQCompactOutputAcrossMultipleFiles(t *testing.T) {
 func TestJQSlurpsMultipleValuesFromStdin(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "echo '1\n2\n3' | jq -s '.'\n",
 	})
 	if err != nil {
@@ -63,8 +65,8 @@ func TestJQSlurpsMultipleValuesFromStdin(t *testing.T) {
 func TestJQSupportsNullInput(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "jq -n 'empty'\n",
 	})
 	if err != nil {
@@ -81,7 +83,7 @@ func TestJQSupportsNullInput(t *testing.T) {
 func TestJQSupportsStdinMarkerWithFiles(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
+	session := newJQSession(t)
 	setup := mustExecSession(t, session, "echo '{\"from\":\"file\"}' > /file.json\n")
 	if setup.ExitCode != 0 {
 		t.Fatalf("setup ExitCode = %d, want 0", setup.ExitCode)
@@ -99,7 +101,7 @@ func TestJQSupportsStdinMarkerWithFiles(t *testing.T) {
 func TestJQSupportsRawInput(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
+	session := newJQSession(t)
 	setup := mustExecSession(t, session, "echo alpha > /in.txt\n echo beta >> /in.txt\n")
 	if setup.ExitCode != 0 {
 		t.Fatalf("setup ExitCode = %d, want 0", setup.ExitCode)
@@ -117,7 +119,7 @@ func TestJQSupportsRawInput(t *testing.T) {
 func TestJQSupportsFilterFromFile(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
+	session := newJQSession(t)
 	setup := mustExecSession(t, session, "echo '.name' > /filter.jq\n")
 	if setup.ExitCode != 0 {
 		t.Fatalf("setup ExitCode = %d, want 0", setup.ExitCode)
@@ -135,8 +137,8 @@ func TestJQSupportsFilterFromFile(t *testing.T) {
 func TestJQSupportsArgAndArgJSON(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `jq -n -c --arg name alice --argjson meta '{"team":"core"}' '{name: $name, team: $meta.team}'` + "\n",
 	})
 	if err != nil {
@@ -153,7 +155,7 @@ func TestJQSupportsArgAndArgJSON(t *testing.T) {
 func TestJQSupportsSlurpfileAndRawfile(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
+	session := newJQSession(t)
 	writeSessionFile(t, session, "/nums.json", []byte("1\n2\n3\n"))
 	writeSessionFile(t, session, "/message.txt", []byte("hello\n"))
 
@@ -169,9 +171,9 @@ func TestJQSupportsSlurpfileAndRawfile(t *testing.T) {
 func TestJQSupportsArgsAndJSONArgs(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
+	rt := newJQRuntime(t)
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `jq -n '$ARGS.positional[1]' --args one two` + "\n",
 	})
 	if err != nil {
@@ -184,7 +186,7 @@ func TestJQSupportsArgsAndJSONArgs(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 
-	result, err = rt.Run(context.Background(), &ExecutionRequest{
+	result, err = rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `jq -n '$ARGS.positional[1].x' --jsonargs '1' '{"x":2}'` + "\n",
 	})
 	if err != nil {
@@ -201,8 +203,8 @@ func TestJQSupportsArgsAndJSONArgs(t *testing.T) {
 func TestJQSupportsRawOutputZeroDelimiter(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `echo '["a","b"]' | jq -r --raw-output0 '.[]'` + "\n",
 	})
 	if err != nil {
@@ -219,8 +221,8 @@ func TestJQSupportsRawOutputZeroDelimiter(t *testing.T) {
 func TestJQSupportsIndentAndTabFormatting(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `echo '{"a":1}' | jq --indent 4 '.'` + "\n",
 	})
 	if err != nil {
@@ -233,7 +235,7 @@ func TestJQSupportsIndentAndTabFormatting(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 
-	result, err = rt.Run(context.Background(), &ExecutionRequest{
+	result, err = rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: `echo '{"a":1}' | jq --tab '.'` + "\n",
 	})
 	if err != nil {
@@ -250,8 +252,8 @@ func TestJQSupportsIndentAndTabFormatting(t *testing.T) {
 func TestJQExitStatusTracksFalsyOutput(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "echo 'false' | jq -e '.'\n",
 	})
 	if err != nil {
@@ -268,8 +270,8 @@ func TestJQExitStatusTracksFalsyOutput(t *testing.T) {
 func TestJQHandlesMissingFile(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "jq '.x' /missing.json\n",
 	})
 	if err != nil {
@@ -286,8 +288,8 @@ func TestJQHandlesMissingFile(t *testing.T) {
 func TestJQHandlesInvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "echo 'not json' | jq '.'\n",
 	})
 	if err != nil {
@@ -304,8 +306,8 @@ func TestJQHandlesInvalidJSON(t *testing.T) {
 func TestJQHandlesInvalidQuery(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "jq 'if . then'\n",
 	})
 	if err != nil {

@@ -1,6 +1,7 @@
 .PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish release-check release-snapshot
 
-GO_PACKAGES := ./... ./contrib/sqlite3/... ./contrib/yq/... ./examples/...
+GO_PACKAGES := ./... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
+BENCH_PACKAGES := ./runtime ./contrib/jq
 
 FUZZTIME ?= 10s
 FUZZ_SMOKE_TIME ?= 3s
@@ -32,7 +33,8 @@ FUZZ_SMOKE_SHARD_PATHS := \
 FUZZ_SMOKE_SHARD_DATA := \
 	FuzzArchiveCommands \
 	./contrib/sqlite3:FuzzSQLiteCommands \
-	./contrib/yq:FuzzYQCommands
+	./contrib/yq:FuzzYQCommands \
+	./contrib/jq:FuzzJQCommands
 
 FUZZ_SMOKE_SHARD_SECURITY := \
 	FuzzGeneratedPrograms \
@@ -54,7 +56,7 @@ FUZZ_FULL_SHARD_1 := \
 	FuzzUniqFlagsCommand \
 	FuzzFileCommandFlags \
 	FuzzBasenameCommand \
-	FuzzJQCompatibilityFlags \
+	./contrib/jq:FuzzJQCompatibilityFlags \
 	FuzzArchiveCommands
 
 FUZZ_FULL_SHARD_2 := \
@@ -93,6 +95,7 @@ FUZZ_FULL_SHARD_4 := \
 	FuzzDataCommands \
 	./contrib/sqlite3:FuzzSQLiteFileCommands \
 	./contrib/yq:FuzzYQCommands \
+	./contrib/jq:FuzzJQCommands \
 	FuzzAttackMutations
 
 FUZZ_FULL_TARGETS := \
@@ -107,6 +110,7 @@ lint:
 	cd examples && golangci-lint run ./...
 	cd contrib/sqlite3 && golangci-lint run ./...
 	cd contrib/yq && golangci-lint run ./...
+	cd contrib/jq && golangci-lint run ./...
 
 test:
 	go test $(GO_PACKAGES)
@@ -143,10 +147,10 @@ fuzz-full:
 	@$(MAKE) --no-print-directory fuzz-run FUZZ_TARGETS="$(FUZZ_FULL_TARGETS)" FUZZTIME="$(FUZZTIME)"
 
 bench-smoke:
-	@go test ./runtime -run=^$$ -bench '$(BENCH_SMOKE_REGEX)' -benchmem -count=$(BENCH_SMOKE_COUNT) -benchtime=$(BENCH_SMOKE_TIME)
+	@go test $(BENCH_PACKAGES) -run=^$$ -bench '$(BENCH_SMOKE_REGEX)' -benchmem -count=$(BENCH_SMOKE_COUNT) -benchtime=$(BENCH_SMOKE_TIME)
 
 bench-full:
-	@go test ./runtime -run=^$$ -bench . -benchmem -count=$(BENCH_FULL_COUNT) -benchtime=$(BENCH_FULL_TIME)
+	@go test $(BENCH_PACKAGES) -run=^$$ -bench . -benchmem -count=$(BENCH_FULL_COUNT) -benchtime=$(BENCH_FULL_TIME)
 
 gnu-test-setup:
 	mkdir -p $(GNU_CACHE_DIR)/bin

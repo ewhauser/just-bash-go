@@ -1,14 +1,16 @@
-package runtime
+package jq
 
 import (
 	"context"
 	"testing"
+
+	gbruntime "github.com/ewhauser/gbash/runtime"
 )
 
 func TestJQSupportsCompatibilityAliasesIsolated(t *testing.T) {
-	rt := newRuntime(t, &Config{})
+	rt := newJQRuntime(t)
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
 		Script: "printf '[1,{\"x\":\"Ω\"}]\\n' > /tmp/in.json\n" +
 			"jq --compact --ascii --color --monochrome '.' /tmp/in.json\n" +
 			"jq -aCMc '.' /tmp/in.json\n",
