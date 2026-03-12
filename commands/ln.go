@@ -27,16 +27,11 @@ func (c *LN) Run(ctx context.Context, inv *Invocation) error {
 	verbose := false
 
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		switch args[0] {
-		case "-s":
-			symbolic = true
-		case "-f":
-			force = true
-		case "-v":
-			verbose = true
-		case "-n":
-			// Accepted for compatibility; current runtime has no special directory-symlink handling here.
-		default:
+		if args[0] == "--" {
+			args = args[1:]
+			break
+		}
+		if strings.HasPrefix(args[0], "--") || !applyLNShortFlags(args[0], &symbolic, &force, &verbose) {
 			return exitf(inv, 1, "ln: unsupported flag %s", args[0])
 		}
 		args = args[1:]
@@ -97,6 +92,27 @@ func (c *LN) Run(ctx context.Context, inv *Invocation) error {
 		}
 	}
 	return nil
+}
+
+func applyLNShortFlags(arg string, symbolic, force, verbose *bool) bool {
+	if len(arg) < 2 || arg[0] != '-' {
+		return false
+	}
+	for _, ch := range arg[1:] {
+		switch ch {
+		case 's':
+			*symbolic = true
+		case 'f':
+			*force = true
+		case 'v':
+			*verbose = true
+		case 'n':
+			// Accepted for compatibility; current runtime has no special directory-symlink handling here.
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 var _ Command = (*LN)(nil)
