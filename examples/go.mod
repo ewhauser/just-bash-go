@@ -31,8 +31,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/itchyny/gojq v0.12.18 // indirect
-	github.com/itchyny/timefmt-go v0.1.7 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect

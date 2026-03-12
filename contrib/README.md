@@ -10,5 +10,6 @@ Rules for this directory:
 
 Today that includes:
 
+- `contrib/jq` for the optional sandboxed `jq` command and its JSON/query stack
 - `contrib/sqlite3` for the optional sandboxed `sqlite3` command
 - `contrib/yq` for the optional sandboxed `yq` command and its YAML/query stack

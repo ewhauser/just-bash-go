@@ -130,17 +130,6 @@ func BenchmarkCommandSortUniq(b *testing.B) {
 	}, "5000\n")
 }
 
-func BenchmarkCommandJQTransform(b *testing.B) {
-	files, totalBytes := jqBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	session := mustNewBenchmarkSession(b, rt)
-	b.SetBytes(totalBytes)
-
-	benchmarkSessionExec(b, session, &ExecutionRequest{
-		Script: "jq '[.items[] | select(.enabled) | .id] | length' /bench/jq/input.json\n",
-	}, "1000\n")
-}
-
 func BenchmarkCommandTarGzipRoundTrip(b *testing.B) {
 	files, totalBytes := archiveBenchmarkFiles()
 	rt := newSeededRuntime(b, files)
@@ -233,27 +222,6 @@ func sortBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	content := body.String()
 	files = map[string]string{
 		"/bench/sort/input.txt": content,
-	}
-	totalBytes = int64(len(content))
-	return files, totalBytes
-}
-
-func jqBenchmarkFiles() (files map[string]string, totalBytes int64) {
-	var body strings.Builder
-	body.WriteString("{\"items\":[")
-	for i := range 2000 {
-		if i > 0 {
-			body.WriteByte(',')
-		}
-		fmt.Fprintf(&body, "{\"id\":%d,\"enabled\":%t,\"name\":\"item-%04d\",\"team\":\"core\"}",
-			i,
-			i%2 == 0,
-			i)
-	}
-	body.WriteString("]}\n")
-	content := body.String()
-	files = map[string]string{
-		"/bench/jq/input.json": content,
 	}
 	totalBytes = int64(len(content))
 	return files, totalBytes

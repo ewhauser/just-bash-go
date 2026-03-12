@@ -20,7 +20,6 @@ func FuzzRuntimeScript(f *testing.F) {
 		[]byte("env -i ONLY=value printenv ONLY\n"),
 		[]byte("printf 'x y\\n' | xargs -n 1 echo\n"),
 		[]byte("bash -c 'echo child'\n"),
-		[]byte("jq -n --arg value demo '{value:$value}'\n"),
 		[]byte(">&0\n"),
 		[]byte(">&000000000000000000\n"),
 	}
@@ -68,7 +67,6 @@ func FuzzSessionSequence(f *testing.F) {
 		{[]byte("cd /tmp\n"), []byte("pwd\n")},
 		{[]byte("bash -c 'echo child > /tmp/c'\n"), []byte("cat /tmp/c\n")},
 		{[]byte("printf 'alpha\\nbeta\\n' > /tmp/in.txt\nsort /tmp/in.txt > /tmp/out.txt\n"), []byte("cat /tmp/out.txt\n")},
-		{[]byte("jq -n --arg value seed '{value:$value}' > /tmp/data.json\n"), []byte("jq -r '.value' /tmp/data.json\n")},
 	}
 	for _, seed := range seeds {
 		f.Add(seed.first, seed.second)

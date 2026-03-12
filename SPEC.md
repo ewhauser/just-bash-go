@@ -601,15 +601,14 @@ Initial MVP command set:
 - `gzip`
 - `gunzip`
 - `zcat`
-- `jq`
 - `curl` when network access is configured
 - `mkdir`
 - `rm`
 - `pwd`
 
-For `jq`, the runtime should support a practical CLI-compatible subset for agent workflows, including raw-input mode, file-backed filters, variable injection flags, positional argument injection, and basic output-formatting flags. Module loading and stream-mode parity can follow later.
-
 Contrib commands are registry-backed like core commands, but they are not part of `commands.DefaultRegistry()` and should be imported and registered explicitly by embedders that want them.
+
+For contrib `jq`, the `github.com/ewhauser/gbash/contrib/jq` module should support a practical CLI-compatible subset for agent workflows, including raw-input mode, file-backed filters, variable injection flags, positional argument injection, and basic output-formatting flags. Module loading and stream-mode parity can follow later.
 
 For contrib `sqlite3`, the `github.com/ewhauser/gbash/contrib/sqlite3` module should wrap `ncruces/go-sqlite3` directly rather than embedding the upstream CLI. The implementation should open an in-memory SQLite connection, deserialize database bytes from the sandbox filesystem when a file path is requested, execute SQL inside that in-memory connection, and serialize the database back to the sandbox filesystem only after successful writes. The supported subset should cover `:memory:` and file-backed databases, list / CSV / JSON / line / column / table output, `-header`, `-readonly`, `-bail`, `-cmd`, `-echo`, help, and version output. `ATTACH`, `DETACH`, `VACUUM`, virtual-table creation, and `load_extension()` must stay disabled so SQL cannot escape the sandbox filesystem or reach host file APIs.
 
