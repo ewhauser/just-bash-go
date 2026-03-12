@@ -1,4 +1,4 @@
-.PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup release-check release-snapshot
+.PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish release-check release-snapshot
 
 GO_PACKAGES := ./... ./examples/...
 
@@ -13,6 +13,10 @@ BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarm
 GNU_CACHE_DIR ?= .cache/gnu
 GNU_JBGO_BIN ?= $(GNU_CACHE_DIR)/bin/jbgo
 GNU_RESULTS_DIR ?=
+GNU_FORCE_REBUILD ?=
+GNU_BUILD_CACHE_REPO ?= ewhauser/jbgo
+GNU_BUILD_CACHE_TAG ?= gnu-build-cache-v1
+GNU_BUILD_CACHE_VERSION ?= v1
 
 FUZZ_SMOKE_SHARD_CORE := \
 	FuzzRuntimeScript \
@@ -135,10 +139,14 @@ gnu-test-setup:
 	mkdir -p $(GNU_CACHE_DIR)/bin
 	go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --setup
 
+gnu-build-cache-fetch:
+	GNU_CACHE_DIR='$(GNU_CACHE_DIR)' GNU_JBGO_BIN='$(GNU_JBGO_BIN)' GNU_BUILD_CACHE_REPO='$(GNU_BUILD_CACHE_REPO)' GNU_BUILD_CACHE_TAG='$(GNU_BUILD_CACHE_TAG)' GNU_BUILD_CACHE_VERSION='$(GNU_BUILD_CACHE_VERSION)' ./scripts/gnu-build-cache.sh fetch
+
+gnu-build-cache-publish:
+	GNU_CACHE_DIR='$(GNU_CACHE_DIR)' GNU_JBGO_BIN='$(GNU_JBGO_BIN)' GNU_BUILD_CACHE_REPO='$(GNU_BUILD_CACHE_REPO)' GNU_BUILD_CACHE_TAG='$(GNU_BUILD_CACHE_TAG)' GNU_BUILD_CACHE_VERSION='$(GNU_BUILD_CACHE_VERSION)' ./scripts/gnu-build-cache.sh publish
+
 gnu-test:
-	mkdir -p $(GNU_CACHE_DIR)/bin
-	go build -o $(GNU_JBGO_BIN) ./cmd/jbgo
-	GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' GNU_RESULTS_DIR='$(GNU_RESULTS_DIR)' go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --jbgo-bin $(GNU_JBGO_BIN) $(if $(GNU_RESULTS_DIR),--results-dir $(GNU_RESULTS_DIR),)
+	GNU_CACHE_DIR='$(GNU_CACHE_DIR)' GNU_JBGO_BIN='$(GNU_JBGO_BIN)' GNU_RESULTS_DIR='$(GNU_RESULTS_DIR)' GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' GNU_FORCE_REBUILD='$(GNU_FORCE_REBUILD)' GNU_BUILD_CACHE_REPO='$(GNU_BUILD_CACHE_REPO)' GNU_BUILD_CACHE_TAG='$(GNU_BUILD_CACHE_TAG)' GNU_BUILD_CACHE_VERSION='$(GNU_BUILD_CACHE_VERSION)' ./scripts/gnu-build-cache.sh run
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check

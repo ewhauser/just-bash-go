@@ -28,6 +28,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Compute GNU build cache key
+        id: gnu-build-cache-key
+        run: echo "key=$(./scripts/gnu-build-cache.sh cache-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore prepared GNU build archive cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/gnu/prebuilt
+          key: ${{ steps.gnu-build-cache-key.outputs.key }}
+
       - uses: actions/configure-pages@v5
 
       - name: Run GNU compatibility harness

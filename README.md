@@ -524,7 +524,16 @@ Prepare the pinned GNU source tree:
 make gnu-test-setup
 ```
 
-Run the full configured harness or limit it to selected utilities:
+Fetch the prepared GNU build cache for your platform:
+
+```bash
+make gnu-build-cache-fetch
+```
+
+Run the full configured harness or limit it to selected utilities. `make gnu-test`
+now prefers a prepared GNU build archive from the local cache, then the dedicated
+GitHub Release cache, and only falls back to a local `configure && make` when no
+prepared archive is available:
 
 ```bash
 make gnu-test
@@ -536,6 +545,13 @@ Useful overrides:
 - `GNU_UTILS` limits the utility list.
 - `GNU_TESTS` runs exact GNU test files instead of the manifest-selected utility suites.
 - `GNU_KEEP_WORKDIR=1` preserves the temporary patched/build workdir.
+- `GNU_FORCE_REBUILD=1` bypasses any prepared archive and forces a fresh local GNU build.
+
+Maintainers can refresh the published prepared build archive set with:
+
+```bash
+make gnu-build-cache-publish
+```
 
 ## License
 
