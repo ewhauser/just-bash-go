@@ -300,9 +300,17 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(srcDir) error = %v", err)
 	}
+	testsDir := filepath.Join(workDir, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(testsDir) error = %v", err)
+	}
 	makefile := "check-am: all-am\nTESTS_ENVIRONMENT = \\\n  env PATH=\"$(abs_top_builddir)/src:$$PATH\" \\\n"
 	if err := os.WriteFile(filepath.Join(workDir, "Makefile"), []byte(makefile), 0o644); err != nil {
 		t.Fatalf("WriteFile(Makefile) error = %v", err)
+	}
+	initBody := "setup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n"
+	if err := os.WriteFile(filepath.Join(testsDir, "init.sh"), []byte(initBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(init.sh) error = %v", err)
 	}
 	gbashBin := filepath.Join(workDir, "gbash")
 	if err := os.WriteFile(gbashBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -327,6 +335,33 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 		if info.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("%q is not a symlink", path)
 		}
+	}
+}
+
+func TestPatchTestInitSetupPathIsIdempotent(t *testing.T) {
+	initPath := filepath.Join(t.TempDir(), "init.sh")
+	original := "setup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n"
+	if err := os.WriteFile(initPath, []byte(original), 0o644); err != nil {
+		t.Fatalf("WriteFile(init.sh) error = %v", err)
+	}
+
+	if err := patchTestInitSetupPath(initPath); err != nil {
+		t.Fatalf("patchTestInitSetupPath() error = %v", err)
+	}
+	if err := patchTestInitSetupPath(initPath); err != nil {
+		t.Fatalf("second patchTestInitSetupPath() error = %v", err)
+	}
+
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		t.Fatalf("ReadFile(init.sh) error = %v", err)
+	}
+	contents := string(data)
+	if count := strings.Count(contents, "jbgo_path_before_setup_=$PATH"); count != 1 {
+		t.Fatalf("jbgo setup guard count = %d, want 1; contents=%q", count, contents)
+	}
+	if !strings.Contains(contents, "PATH=$jbgo_path_before_setup_\nexport PATH\n") {
+		t.Fatalf("patched init.sh missing PATH restore; contents=%q", contents)
 	}
 }
 
@@ -552,13 +587,39 @@ func TestResolveUtilityTestsAppliesPatternAndSkipFilters(t *testing.T) {
 	}
 }
 
+func TestResolveUtilityTestsSkipsGeneratedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "tests/seq/seq-precision.sh", "#!/bin/sh\n")
+	writeTestFile(t, root, "tests/seq/seq-precision.log", "generated\n")
+	writeTestFile(t, root, "tests/seq/seq-precision.trs", "generated\n")
+
+	tests, skipped, err := resolveUtilityTests(root, utilityManifest{
+		Name:     "seq",
+		Patterns: []string{"tests/seq/*"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveUtilityTests() error = %v", err)
+	}
+	if got, want := tests, []string{"tests/seq/seq-precision.sh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tests = %#v, want %#v", got, want)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want no skipped entries", skipped)
+	}
+}
+
 func writeTestFile(t *testing.T, root, rel, contents string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v", path, err)
 	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	switch filepath.Ext(path) {
+	case ".sh", ".pl", ".xpl":
+		mode = 0o755
+	}
+	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 }

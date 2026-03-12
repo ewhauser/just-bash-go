@@ -115,7 +115,7 @@ fetch_archive() {
 
   local tmpdir
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' RETURN
+  trap 'rm -rf "${tmpdir:-}"; trap - RETURN' RETURN
 
   gh release download "$GNU_BUILD_CACHE_TAG" \
     -R "$GNU_BUILD_CACHE_REPO" \
@@ -137,7 +137,7 @@ publish_archive() {
 
   local tmpdir archive sha256
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' RETURN
+  trap 'rm -rf "${tmpdir:-}"; trap - RETURN' RETURN
   archive="$tmpdir/$ARCHIVE_NAME"
 
   (
