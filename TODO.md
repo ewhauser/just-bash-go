@@ -180,7 +180,7 @@ Auto-generated — re-run the upstream-diff skill to refresh.
 - [ ] `time`
 - [ ] `unalias`
 - [ ] `unexpand` (upstream flags: `-t`, `-a`)
-- [ ] `whoami`
+- [x] `whoami`
 - [ ] `xan`
 
 ### Missing Flags

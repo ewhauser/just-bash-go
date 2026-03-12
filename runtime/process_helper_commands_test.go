@@ -176,6 +176,103 @@ func TestDateSupportsLongFlagAliases(t *testing.T) {
 	}
 }
 
+func TestWhoamiReportsDeterministicSandboxIdentity(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "whoami\nid -un\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "agent\nagent\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestWhoamiFallsBackFromUSERToLOGNAME(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "env USER= LOGNAME=logger whoami\nenv USER= LOGNAME= whoami\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "logger\nagent\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestWhoamiHelpVersionAndErrors(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name       string
+		script     string
+		wantCode   int
+		wantOut    string
+		wantStderr string
+	}{
+		{
+			name:     "help",
+			script:   "whoami --help\n",
+			wantCode: 0,
+			wantOut:  "usage: whoami\n",
+		},
+		{
+			name:     "version",
+			script:   "whoami --version\n",
+			wantCode: 0,
+			wantOut:  "whoami (gbash)\n",
+		},
+		{
+			name:       "invalid long option",
+			script:     "whoami --definitely-invalid\n",
+			wantCode:   1,
+			wantStderr: "whoami: unrecognized option '--definitely-invalid'\n",
+		},
+		{
+			name:       "invalid short option",
+			script:     "whoami -x\n",
+			wantCode:   1,
+			wantStderr: "whoami: invalid option -- 'x'\n",
+		},
+		{
+			name:       "extra operand",
+			script:     "whoami someone\n",
+			wantCode:   1,
+			wantStderr: "whoami: extra operand 'someone'\nTry 'whoami --help' for more information.\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: tc.script,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != tc.wantCode {
+				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tc.wantOut {
+				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
+			}
+			if got := result.Stderr; got != tc.wantStderr {
+				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
+
 func TestUptimeDefaultSincePrettyAndVersion(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
