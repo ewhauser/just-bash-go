@@ -37,6 +37,7 @@ type tailOptions struct {
 	sleepInterval      time.Duration
 	maxUnchangedStats  int
 	disableInotifyHint bool
+	debug              bool
 }
 
 type tailFollowState struct {
@@ -184,6 +185,12 @@ func (c *Tail) Run(ctx context.Context, inv *Invocation) error {
 
 	ticker := time.NewTicker(opts.sleepInterval)
 	defer ticker.Stop()
+
+	if opts.debug {
+		if _, err := fmt.Fprintln(inv.Stderr, "tail: using polling mode"); err != nil {
+			return &ExitError{Code: 1, Err: err}
+		}
+	}
 
 	for {
 		select {
@@ -486,6 +493,9 @@ func parseTailArgs(inv *Invocation) (tailOptions, error) {
 			args = args[1:]
 		case arg == "---disable-inotify":
 			opts.disableInotifyHint = true
+			args = args[1:]
+		case arg == "--debug":
+			opts.debug = true
 			args = args[1:]
 		case arg == "-s" || arg == "--sleep-interval":
 			if len(args) < 2 {

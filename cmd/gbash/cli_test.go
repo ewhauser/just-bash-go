@@ -554,6 +554,50 @@ func TestRunCLICompatExecTailFollowNameRejectsDash(t *testing.T) {
 	}
 }
 
+func TestRunCLICompatExecTailDebugReportsPollingMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "a"), nil, 0o644); err != nil {
+		t.Fatalf("WriteFile(a) error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	var stdout strings.Builder
+	stderr := newStreamingWriter()
+	done := make(chan struct {
+		exitCode int
+		err      error
+	}, 1)
+
+	go func() {
+		exitCode, err := runCLI(ctx, "gbash", []string{
+			"compat", "exec", "tail", "--debug", "-n0", "-F", "-s0.05", "a",
+		}, strings.NewReader(""), &stdout, stderr, false)
+		done <- struct {
+			exitCode int
+			err      error
+		}{exitCode: exitCode, err: err}
+	}()
+
+	if !stderr.WaitForSubstring("using polling mode", 200*time.Millisecond) {
+		t.Fatalf("stderr did not report polling mode; got %q", stderr.String())
+	}
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("runCLI() error = %v", result.err)
+	}
+	if result.exitCode != 124 {
+		t.Fatalf("exitCode = %d, want 124; stderr=%q", result.exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "execution timed out") {
+		t.Fatalf("stderr = %q, want timeout marker", stderr.String())
+	}
+}
+
 func TestRunCLIMulticallUsesArgv0CommandAndBypassesTTYRepl(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
