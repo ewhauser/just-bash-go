@@ -973,6 +973,10 @@ The compatibility harness should stay curated. It is not a Bash conformance suit
 - support an explicit results directory so CI and local tooling can publish a stable `summary.json`, with a separate report-rendering script generating `index.html` and `badge.svg` from that summary
 - when the scheduled/manual reporting workflow does not produce a complete report bundle, skip deployment and leave the previously published Pages report in place
 - allow branch and pull-request-adjacent manual runs to generate raw artifacts without attempting a Pages deployment; only the default branch publishes the latest report
+- prefer a prepared GNU build archive fast path for local runs and CI so the harness can skip repeated `configure && make` work on warm runs
+- keep the prepared build archive optional and versioned by GNU release plus a harness cache version, with a full local rebuild fallback when extraction or rehydration fails
+- support a helper script under `scripts/` that can fetch, publish, and run against prepared GNU build archives offline and in CI
+- allow a dedicated GitHub Release tag to seed prepared GNU build archives for supported OS and architecture combinations, with CI cache layered on top for faster repeated runs
 
 ## 18. Future Roadmap
 

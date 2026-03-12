@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -50,13 +51,15 @@ type skipPattern struct {
 }
 
 type options struct {
-	cacheDir    string
-	jbgoBin     string
-	utils       string
-	tests       string
-	resultsDir  string
-	setupOnly   bool
-	keepWorkdir bool
+	cacheDir                  string
+	jbgoBin                   string
+	utils                     string
+	tests                     string
+	resultsDir                string
+	preparedBuildArchive      string
+	writePreparedBuildArchive string
+	setupOnly                 bool
+	keepWorkdir               bool
 }
 
 type testResult struct {
@@ -120,7 +123,10 @@ type makeCheckResult struct {
 	Output   []byte
 }
 
-const sourceCacheVersion = "2"
+const (
+	sourceCacheVersion        = "2"
+	preparedBuildCacheVersion = "v1"
+)
 
 func main() {
 	ctx := context.Background()
@@ -145,6 +151,8 @@ func parseOptions() (options, error) {
 	fs.StringVar(&opts.utils, "utils", strings.TrimSpace(os.Getenv("GNU_UTILS")), "comma or space separated utility list")
 	fs.StringVar(&opts.tests, "tests", strings.TrimSpace(os.Getenv("GNU_TESTS")), "comma or newline separated explicit GNU test files")
 	fs.StringVar(&opts.resultsDir, "results-dir", strings.TrimSpace(os.Getenv("GNU_RESULTS_DIR")), "directory to write summary.json, logs, and published report assets")
+	fs.StringVar(&opts.preparedBuildArchive, "prepared-build-archive", strings.TrimSpace(os.Getenv("GNU_PREPARED_BUILD_ARCHIVE")), "path to a prepared GNU build archive to restore before running tests")
+	fs.StringVar(&opts.writePreparedBuildArchive, "write-prepared-build-archive", strings.TrimSpace(os.Getenv("GNU_WRITE_PREPARED_BUILD_ARCHIVE")), "write a prepared GNU build archive to this path, then exit")
 	fs.BoolVar(&opts.setupOnly, "setup", false, "download and extract the pinned GNU source tree, then exit")
 	fs.BoolVar(&opts.keepWorkdir, "keep-workdir", os.Getenv("GNU_KEEP_WORKDIR") == "1", "preserve the per-run workdir")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -153,8 +161,14 @@ func parseOptions() (options, error) {
 	if fs.NArg() != 0 {
 		return options{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
-	if !opts.setupOnly && strings.TrimSpace(opts.jbgoBin) == "" {
-		return options{}, fmt.Errorf("--jbgo-bin is required unless --setup is used")
+	if opts.setupOnly && strings.TrimSpace(opts.writePreparedBuildArchive) != "" {
+		return options{}, fmt.Errorf("--setup and --write-prepared-build-archive cannot be combined")
+	}
+	if strings.TrimSpace(opts.preparedBuildArchive) != "" && strings.TrimSpace(opts.writePreparedBuildArchive) != "" {
+		return options{}, fmt.Errorf("--prepared-build-archive and --write-prepared-build-archive cannot be combined")
+	}
+	if !opts.setupOnly && strings.TrimSpace(opts.writePreparedBuildArchive) == "" && strings.TrimSpace(opts.jbgoBin) == "" {
+		return options{}, fmt.Errorf("--jbgo-bin is required unless --setup or --write-prepared-build-archive is used")
 	}
 	return opts, nil
 }
@@ -187,12 +201,28 @@ func run(ctx context.Context, mf *manifest, opts *options) error {
 	if err != nil {
 		return err
 	}
-	sourceDir, err := ensureSourceCache(ctx, mf, cacheDir)
-	if err != nil {
-		return err
-	}
 	if opts.setupOnly {
+		sourceDir, err := ensureSourceCache(ctx, mf, cacheDir)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("GNU coreutils %s prepared at %s\n", mf.GNUVersion, sourceDir)
+		return nil
+	}
+
+	if strings.TrimSpace(opts.writePreparedBuildArchive) != "" {
+		archivePath, err := filepath.Abs(opts.writePreparedBuildArchive)
+		if err != nil {
+			return err
+		}
+		sourceDir, err := ensureSourceCache(ctx, mf, cacheDir)
+		if err != nil {
+			return err
+		}
+		if err := buildPreparedBuildArchive(ctx, makeBin, cacheDir, mf.GNUVersion, sourceDir, archivePath, opts.keepWorkdir); err != nil {
+			return err
+		}
+		fmt.Printf("prepared GNU build archive: %s\n", archivePath)
 		return nil
 	}
 
@@ -204,21 +234,41 @@ func run(ctx context.Context, mf *manifest, opts *options) error {
 		return err
 	}
 
-	workDir, err := prepareWorkDir(cacheDir, mf.GNUVersion, sourceDir)
-	if err != nil {
-		return err
-	}
-	if !opts.keepWorkdir {
-		defer func() { _ = os.RemoveAll(workDir) }()
-	}
-
 	resultsDir, err := prepareResultsDir(cacheDir, opts.resultsDir)
 	if err != nil {
 		return fmt.Errorf("create results dir: %w", err)
 	}
 
-	if err := configureAndBuild(ctx, makeBin, workDir); err != nil {
-		return err
+	preparedArchivePath := strings.TrimSpace(opts.preparedBuildArchive)
+	if preparedArchivePath != "" {
+		preparedArchivePath, err = filepath.Abs(preparedArchivePath)
+		if err != nil {
+			return err
+		}
+	}
+
+	var workDir string
+	if preparedArchivePath != "" {
+		workDir, err = prepareWorkDirFromPreparedArchive(ctx, cacheDir, mf.GNUVersion, preparedArchivePath)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "jbgo-gnu: prepared build archive unavailable (%v); falling back to full build\n", err)
+		}
+	}
+	if workDir == "" {
+		sourceDir, err := ensureSourceCache(ctx, mf, cacheDir)
+		if err != nil {
+			return err
+		}
+		workDir, err = prepareWorkDir(cacheDir, mf.GNUVersion, sourceDir)
+		if err != nil {
+			return err
+		}
+		if err := configureAndBuild(ctx, makeBin, workDir); err != nil {
+			return err
+		}
+	}
+	if !opts.keepWorkdir {
+		defer func() { _ = os.RemoveAll(workDir) }()
 	}
 
 	programs, err := listGNUPrograms(ctx, workDir)
@@ -392,6 +442,156 @@ func prepareWorkDir(cacheDir, version, sourceDir string) (string, error) {
 		return "", fmt.Errorf("copy source tree: %w", err)
 	}
 	return workDir, nil
+}
+
+func prepareWorkDirFromPreparedArchive(ctx context.Context, cacheDir, version, archivePath string) (string, error) {
+	workRoot := filepath.Join(cacheDir, "work")
+	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+		return "", err
+	}
+	workDir, err := os.MkdirTemp(workRoot, "coreutils-"+version+"-")
+	if err != nil {
+		return "", err
+	}
+	if err := extractTarGz(archivePath, workDir); err != nil {
+		_ = os.RemoveAll(workDir)
+		return "", fmt.Errorf("extract prepared GNU build archive: %w", err)
+	}
+	if err := relocatePreparedBuild(ctx, workDir); err != nil {
+		_ = os.RemoveAll(workDir)
+		return "", err
+	}
+	return workDir, nil
+}
+
+func buildPreparedBuildArchive(ctx context.Context, makeBin, cacheDir, version, sourceDir, archivePath string, keepWorkdir bool) error {
+	workDir, err := prepareWorkDir(cacheDir, version, sourceDir)
+	if err != nil {
+		return err
+	}
+	if !keepWorkdir {
+		defer func() { _ = os.RemoveAll(workDir) }()
+	}
+	if err := configureAndBuild(ctx, makeBin, workDir); err != nil {
+		return err
+	}
+	if err := archiveDirectoryAsTarGz(workDir, archivePath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func relocatePreparedBuild(_ context.Context, workDir string) error {
+	originalWorkDir, err := preparedBuildOriginalWorkDir(workDir)
+	if err != nil {
+		return fmt.Errorf("relocate prepared GNU build: %w", err)
+	}
+	if originalWorkDir == "" || originalWorkDir == workDir {
+		return nil
+	}
+
+	return filepath.Walk(workDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.IndexByte(data, 0) >= 0 || !bytes.Contains(data, []byte(originalWorkDir)) {
+			return nil
+		}
+
+		updated := bytes.ReplaceAll(data, []byte(originalWorkDir), []byte(workDir))
+		if err := os.WriteFile(path, updated, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Chtimes(path, info.ModTime(), info.ModTime())
+	})
+}
+
+func preparedBuildOriginalWorkDir(workDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(workDir, "config.status"))
+	if err != nil {
+		return "", err
+	}
+	const prefix = "ac_pwd='"
+	start := bytes.Index(data, []byte(prefix))
+	if start == -1 {
+		return "", nil
+	}
+	start += len(prefix)
+	end := bytes.IndexByte(data[start:], '\'')
+	if end == -1 {
+		return "", fmt.Errorf("could not parse original workdir from config.status")
+	}
+	return string(data[start : start+end]), nil
+}
+
+func archiveDirectoryAsTarGz(sourceDir, archivePath string) error {
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		return err
+	}
+	file, err := os.Create(archivePath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	gzw := gzip.NewWriter(file)
+	defer func() { _ = gzw.Close() }()
+
+	tw := tar.NewWriter(gzw)
+	defer func() { _ = tw.Close() }()
+
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == sourceDir {
+			return nil
+		}
+		rel, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		linkTarget := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+		hdr, err := tar.FileInfoHeader(info, linkTarget)
+		if err != nil {
+			return err
+		}
+		hdr.Name = rel
+		if info.IsDir() && !strings.HasSuffix(hdr.Name, "/") {
+			hdr.Name += "/"
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		src, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = src.Close() }()
+		if _, err := io.Copy(tw, src); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func configureAndBuild(ctx context.Context, makeBin, workDir string) error {

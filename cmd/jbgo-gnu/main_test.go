@@ -3,9 +3,11 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -306,6 +308,57 @@ func TestPrepareWorkDirPreservesFileTimes(t *testing.T) {
 	}
 }
 
+func TestPrepareWorkDirFromPreparedArchiveRelocatesPathsAndPreservesSymlink(t *testing.T) {
+	cacheDir := t.TempDir()
+	sourceDir := t.TempDir()
+	originalWorkDir := "/tmp/coreutils-build"
+	configStatus := filepath.Join(sourceDir, "config.status")
+	configBody := "#!/bin/sh\nac_pwd='" + originalWorkDir + "'\n"
+	if err := os.WriteFile(configStatus, []byte(configBody), 0o755); err != nil {
+		t.Fatalf("WriteFile(config.status) error = %v", err)
+	}
+	makefilePath := filepath.Join(sourceDir, "Makefile")
+	makefileBody := "abs_top_builddir = " + originalWorkDir + "\n"
+	if err := os.WriteFile(makefilePath, []byte(makefileBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(Makefile) error = %v", err)
+	}
+	targetPath := filepath.Join(sourceDir, "target.txt")
+	if err := os.WriteFile(targetPath, []byte("payload\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(target.txt) error = %v", err)
+	}
+	linkPath := filepath.Join(sourceDir, "link.txt")
+	if err := os.Symlink("target.txt", linkPath); err != nil {
+		t.Fatalf("Symlink(link.txt) error = %v", err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "prepared.tar.gz")
+	if err := archiveDirectoryAsTarGz(sourceDir, archivePath); err != nil {
+		t.Fatalf("archiveDirectoryAsTarGz() error = %v", err)
+	}
+
+	workDir, err := prepareWorkDirFromPreparedArchive(context.Background(), cacheDir, "9.10", archivePath)
+	if err != nil {
+		t.Fatalf("prepareWorkDirFromPreparedArchive() error = %v", err)
+	}
+
+	makefileData, err := os.ReadFile(filepath.Join(workDir, "Makefile"))
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	if strings.Contains(string(makefileData), originalWorkDir) {
+		t.Fatalf("Makefile still mentions original workdir %q", originalWorkDir)
+	}
+	if !strings.Contains(string(makefileData), workDir) {
+		t.Fatalf("Makefile does not mention restored workdir %q", workDir)
+	}
+	target, err := os.Readlink(filepath.Join(workDir, "link.txt"))
+	if err != nil {
+		t.Fatalf("Readlink(link.txt) error = %v", err)
+	}
+	if target != "target.txt" {
+		t.Fatalf("link target = %q, want %q", target, "target.txt")
+	}
+}
+
 func TestExtractTarGzPreservesTarHeaderModTimes(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "coreutils.tar.gz")
 	dest := t.TempDir()
@@ -355,6 +408,30 @@ func TestExtractTarGzPreservesTarHeaderModTimes(t *testing.T) {
 	}
 	if !inInfo.ModTime().Equal(makefileINTime) {
 		t.Fatalf("Makefile.in mod time = %v, want %v", inInfo.ModTime(), makefileINTime)
+	}
+}
+
+func TestParseOptionsAllowsPreparedArchiveWriterWithoutJBGOBin(t *testing.T) {
+	argv := os.Args
+	t.Cleanup(func() { os.Args = argv })
+	os.Args = []string{"jbgo-gnu", "--write-prepared-build-archive", "/tmp/prepared.tar.gz"}
+
+	opts, err := parseOptions()
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if opts.writePreparedBuildArchive != "/tmp/prepared.tar.gz" {
+		t.Fatalf("writePreparedBuildArchive = %q, want /tmp/prepared.tar.gz", opts.writePreparedBuildArchive)
+	}
+}
+
+func TestParseOptionsRejectsConflictingPreparedArchiveFlags(t *testing.T) {
+	argv := os.Args
+	t.Cleanup(func() { os.Args = argv })
+	os.Args = []string{"jbgo-gnu", "--jbgo-bin", "/tmp/jbgo", "--prepared-build-archive", "/tmp/in.tar.gz", "--write-prepared-build-archive", "/tmp/out.tar.gz"}
+
+	if _, err := parseOptions(); err == nil {
+		t.Fatalf("parseOptions() error = nil, want conflict error")
 	}
 }
 
