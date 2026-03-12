@@ -91,12 +91,15 @@ func computeChmodMode(current stdfs.FileMode, spec string) (stdfs.FileMode, erro
 			return 0, fmt.Errorf("empty clause")
 		}
 		idx := strings.IndexAny(clause, "+-=")
-		if idx <= 0 || idx == len(clause)-1 {
+		if idx <= 0 {
 			return 0, fmt.Errorf("invalid clause")
 		}
 		whoPart := clause[:idx]
 		op := clause[idx]
 		permPart := clause[idx+1:]
+		if permPart == "" && op != '=' {
+			return 0, fmt.Errorf("invalid clause")
+		}
 		whoMask, specialMask := chmodWhoMasks(whoPart)
 		if whoMask == 0 && specialMask == 0 {
 			return 0, fmt.Errorf("invalid subject")

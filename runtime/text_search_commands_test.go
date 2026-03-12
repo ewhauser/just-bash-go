@@ -23,6 +23,23 @@ func TestPrintfReusesFormatAndHonorsStop(t *testing.T) {
 	}
 }
 
+func TestPrintfSupportsBareOctalEscapes(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '\\351\\351\\n' | tr '\\351' x\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "xx\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestCommSupportsStdinAndColumnSuppression(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 

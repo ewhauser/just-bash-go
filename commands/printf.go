@@ -226,6 +226,16 @@ func decodeEscapeAtWithStop(s string, i int) (decoded string, advance int, stop 
 			return "", i, false, err
 		}
 		return string([]byte{byte(value)}), end - 1, false, nil
+	case '1', '2', '3', '4', '5', '6', '7':
+		end := i + 1
+		for end < len(s) && end < i+4 && s[end] >= '0' && s[end] <= '7' {
+			end++
+		}
+		value, err := strconv.ParseUint(s[i+1:end], 8, 8)
+		if err != nil {
+			return "", i, false, err
+		}
+		return string([]byte{byte(value)}), end - 1, false, nil
 	case '0':
 		end := i + 2
 		for end < len(s) && end < i+5 && s[end] >= '0' && s[end] <= '7' {
