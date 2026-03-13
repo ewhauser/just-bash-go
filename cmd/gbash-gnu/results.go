@@ -188,9 +188,6 @@ func summarizeUtilityTotals(results []utilityResult) utilityTotals {
 	totals := utilityTotals{}
 	for i := range results {
 		result := &results[i]
-		if result.Inactive {
-			continue
-		}
 		totals.Total++
 		if result.Summary.RunnableTotal == 0 {
 			totals.NoRunnableTests++
@@ -205,57 +202,6 @@ func summarizeUtilityTotals(results []utilityResult) utilityTotals {
 	totals.PassPctTotal = percentage(totals.Passed, totals.Total)
 	totals.PassPctRunnable = percentage(totals.Passed, totals.Passed+totals.Failed)
 	return totals
-}
-
-func completeUtilityResults(results []utilityResult, programs []string, manifestUtilities, selectedUtilities []utilityManifest, supportedSet map[string]struct{}) []utilityResult {
-	activeByName := make(map[string]utilityResult, len(results))
-	for i := range results {
-		result := results[i]
-		activeByName[result.Name] = result
-	}
-	manifestSet := make(map[string]struct{}, len(manifestUtilities))
-	for _, utility := range manifestUtilities {
-		manifestSet[utility.Name] = struct{}{}
-	}
-	selectedSet := make(map[string]struct{}, len(selectedUtilities))
-	for _, utility := range selectedUtilities {
-		selectedSet[utility.Name] = struct{}{}
-	}
-
-	out := make([]utilityResult, 0, len(programs))
-	for _, name := range programs {
-		if result, ok := activeByName[name]; ok {
-			out = append(out, result)
-			delete(activeByName, name)
-			continue
-		}
-		out = append(out, utilityResult{
-			Name:     name,
-			Inactive: true,
-			Reason:   inactiveUtilityReason(name, manifestSet, selectedSet, supportedSet),
-		})
-	}
-	for i := range results {
-		result := results[i]
-		if _, ok := activeByName[result.Name]; ok {
-			out = append(out, result)
-			delete(activeByName, result.Name)
-		}
-	}
-	return out
-}
-
-func inactiveUtilityReason(name string, manifestSet, selectedSet, supportedSet map[string]struct{}) string {
-	if _, ok := manifestSet[name]; ok {
-		if _, ok := selectedSet[name]; ok {
-			return ""
-		}
-		return "not selected in this run"
-	}
-	if _, ok := supportedSet[name]; ok {
-		return "implemented in gbash, but not included in the compatibility manifest"
-	}
-	return "not currently covered by the compatibility manifest"
 }
 
 func writeJSON(path string, value any) error {

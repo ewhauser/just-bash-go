@@ -993,7 +993,7 @@ The compatibility harness should stay curated. It is not a Bash conformance suit
 - keep it outside `go test ./...`, `make test`, and the default CI path
 - allow a dedicated scheduled/manual reporting workflow for the harness, separate from the default push and pull-request CI jobs
 - pin one GNU coreutils release in a committed manifest and fetch that release into a local cache on demand
-- run GNU tests utility-by-utility against symlinked `gbash` utility names, with unsupported GNU utility names replaced by explicit `127` stubs instead of host fallback
+- run GNU tests utility-by-utility against symlinked `gbash` utility names, reserving GNU utility names so missing coverage cannot fall through to host fallback
 - expose any implemented GNU-overlap helper command in the generated utility directory even when that helper's own suite is not part of the selected run, so dependent GNU tests do not fall through to host tools
 - keep the harness strict about GNU utility names while still allowing the non-coreutils host tooling that the GNU test framework itself needs
 - skip root-only, controlling-TTY, SELinux, and help/version-only cases in the first cut rather than patching expected utility output

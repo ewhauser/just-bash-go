@@ -99,13 +99,6 @@ th {
   background: rgba(246,244,239,0.85);
 }
 tbody tr:last-child td { border-bottom: 0; }
-.inactive td {
-  color: var(--muted);
-  background: rgba(246,244,239,0.65);
-}
-.inactive a {
-  color: var(--muted);
-}
 .pill {
   display: inline-block;
   min-width: 64px;
@@ -173,7 +166,7 @@ tbody tr:last-child td { border-bottom: 0; }
         </thead>
         <tbody>
           {{- range .Rows }}
-          <tr class="{{ .RowClass }}">
+          <tr>
             <td><strong>{{ .Name }}</strong></td>
             <td><span class="pill {{ .PercentClass }}">{{ .Percent }}</span></td>
             <td>{{ .Selected }}</td>

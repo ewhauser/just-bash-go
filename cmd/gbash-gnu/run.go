@@ -17,12 +17,9 @@ type executionEnv struct {
 }
 
 type executionPlan struct {
-	programs          []string
-	selectedUtilities []utilityManifest
-	runTargets        []utilityManifest
-	explicitTests     []string
-	supportedSet      map[string]struct{}
-	configShell       string
+	runTargets    []utilityManifest
+	explicitTests []string
+	configShell   string
 }
 
 func run(ctx context.Context, mf *manifest, opts *options) error {
@@ -188,8 +185,7 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	if len(explicitTests) != 0 {
 		runTargets = []utilityManifest{{Name: "explicit-tests"}}
 	}
-	supportedSet := implementedGNUProgramSet()
-	if err := prepareProgramDir(env.workDir, env.gbashBin, programs, supportedSet); err != nil {
+	if err := prepareProgramDir(env.workDir, env.gbashBin, programs); err != nil {
 		return nil, err
 	}
 	configShell, err := compatConfigShellPath(env.workDir)
@@ -201,12 +197,9 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	}
 
 	return &executionPlan{
-		programs:          programs,
-		selectedUtilities: selectedUtilities,
-		runTargets:        runTargets,
-		explicitTests:     explicitTests,
-		supportedSet:      supportedSet,
-		configShell:       configShell,
+		runTargets:    runTargets,
+		explicitTests: explicitTests,
+		configShell:   configShell,
 	}, nil
 }
 
@@ -226,10 +219,6 @@ func executeCompatibilityRun(ctx context.Context, makeBin string, mf *manifest, 
 		return runSummary{}, false, err
 	}
 	summary.Utilities = append(summary.Utilities, results...)
-
-	if len(plan.explicitTests) == 0 {
-		summary.Utilities = completeUtilityResults(summary.Utilities, plan.programs, mf.Utilities, plan.selectedUtilities, plan.supportedSet)
-	}
 	return summary, hadFailure, nil
 }
 
@@ -267,7 +256,6 @@ func executeUtilityRunsIndividually(ctx context.Context, makeBin string, env *ex
 			Summary: summarizeTestResults(nil, len(run.Skipped), 0),
 		}
 		if len(run.Tests) == 0 {
-			result.Reason = "no runnable GNU tests matched after applying skip filters"
 			results = append(results, result)
 			continue
 		}
@@ -303,7 +291,6 @@ func executeUtilityRunsBatched(ctx context.Context, makeBin string, env *executi
 				Tests:   run.Tests,
 				Skipped: run.Skipped,
 				Summary: summarizeTestResults(nil, len(run.Skipped), 0),
-				Reason:  "no runnable GNU tests matched after applying skip filters",
 			}
 			results = append(results, result)
 		}
@@ -361,7 +348,6 @@ func buildBatchedUtilityResults(runs []utilityRun, makeCheckResult makeCheckResu
 			Summary: summarizeTestResults(nil, len(run.Skipped), 0),
 		}
 		if len(run.Tests) == 0 {
-			result.Reason = "no runnable GNU tests matched after applying skip filters"
 			results = append(results, result)
 			continue
 		}

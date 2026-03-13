@@ -1,13 +1,12 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/ewhauser/gbash/commands"
 )
 
 type fuzzCommandMetadata struct {
@@ -584,11 +583,11 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 	})
 	for _, name := range registryNames {
 		if _, ok := seen[name]; !ok {
-			cmd, ok := rt.cfg.Registry.Lookup(name)
+			_, ok := rt.cfg.Registry.Lookup(name)
 			if !ok {
 				tb.Fatalf("registry missing command %q during fuzz metadata validation", name)
 			}
-			if _, ok := cmd.(*commands.NotImplemented); ok {
+			if runtimeCommandReturnsNotImplemented(tb, rt, name) {
 				spec := fuzzSpec(name, "shell", fuzzVariant("", "placeholder"))
 				specs = append(specs, spec)
 				seen[name] = struct{}{}
@@ -599,6 +598,19 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 	}
 
 	return specs
+}
+
+func runtimeCommandReturnsNotImplemented(tb testing.TB, rt *Runtime, name string) bool {
+	tb.Helper()
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: name + "\n"})
+	if err != nil {
+		tb.Fatalf("Run(%q) error = %v", name, err)
+	}
+	if result.ExitCode != 1 {
+		return false
+	}
+	return result.Stderr == fmt.Sprintf("%s: not implemented\n", name)
 }
 
 func fuzzSpec(name, category string, variants ...fuzzCommandVariant) fuzzCommandMetadata {

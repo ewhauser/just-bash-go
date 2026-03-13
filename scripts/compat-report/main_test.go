@@ -41,8 +41,7 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 				Summary: testSummary{SelectedTotal: 1, Skip: 1, RunnableTotal: 0, PassPctSelected: 0, PassPctRunnable: 0},
 			},
 			{
-				Name:   "dirname",
-				Reason: "still failing GNU edge cases",
+				Name: "dirname",
 				Summary: testSummary{
 					SelectedTotal:   1,
 					Fail:            1,
@@ -50,11 +49,6 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 					PassPctSelected: 0,
 					PassPctRunnable: 0,
 				},
-			},
-			{
-				Name:     "base32",
-				Inactive: true,
-				Reason:   "implemented in gbash, but not included in the compatibility manifest",
 			},
 		},
 	}
@@ -76,13 +70,9 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 		"basename.log",
 		"dirname",
 		"cat.log",
-		"base32",
-		"<tr class=\"inactive\">",
-		"implemented in gbash, but not included in the compatibility manifest",
 		"all selected tests skipped",
 		"1 passed, 1 failed, 1 skip-only, 0 empty",
 		"n/a",
-		">-</span>",
 		"33.33%",
 		"50%",
 	} {
@@ -124,5 +114,24 @@ func TestLoadSummaryReadsHarnessJSON(t *testing.T) {
 	}
 	if len(summary.Utilities) != 1 || summary.Utilities[0].Name != "basename" {
 		t.Fatalf("utilities = %#v, want one basename utility", summary.Utilities)
+	}
+}
+
+func TestLoadSummaryRejectsRemovedInactiveFields(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "summary.json")
+	if err := os.WriteFile(summaryPath, []byte(`{
+  "gnu_version": "9.10",
+  "generated_at": "2026-03-11T18:30:00Z",
+  "overall": { "selected_total": 0, "pass": 0, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 0, "pass_pct_selected": 0, "pass_pct_runnable": 0 },
+  "utility_summary": { "total": 0, "passed": 0, "failed": 0, "no_runnable_tests": 0, "pass_pct_total": 0, "pass_pct_runnable": 0 },
+  "utilities": [
+    { "name": "basename", "inactive": true, "summary": { "selected_total": 0, "pass": 0, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 0, "pass_pct_selected": 0, "pass_pct_runnable": 0 } }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(summary.json) error = %v", err)
+	}
+
+	if _, err := loadSummary(summaryPath); err == nil {
+		t.Fatalf("loadSummary() error = nil, want unknown-field failure")
 	}
 }
