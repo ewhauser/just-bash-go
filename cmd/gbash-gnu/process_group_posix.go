@@ -12,7 +12,7 @@ func configureIsolatedProcessGroup(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
 func terminateIsolatedProcessGroup(cmd *exec.Cmd) error {
