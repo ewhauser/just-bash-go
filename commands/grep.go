@@ -56,7 +56,51 @@ func (c *Grep) Name() string {
 }
 
 func (c *Grep) Run(ctx context.Context, inv *Invocation) error {
-	opts, files, err := parseGrepArgs(inv)
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Grep) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "grep",
+		About: "Print lines that match patterns.",
+		Usage: "grep [OPTION]... PATTERNS [FILE]...",
+		Options: []OptionSpec{
+			{Name: "ignore-case", Short: 'i', Long: "ignore-case", Help: "ignore case distinctions"},
+			{Name: "line-number", Short: 'n', Long: "line-number", Help: "print line number with output lines"},
+			{Name: "invert-match", Short: 'v', Long: "invert-match", Help: "select non-matching lines"},
+			{Name: "count", Short: 'c', Long: "count", Help: "print only a count of matching lines per FILE"},
+			{Name: "files-with-matches", Short: 'l', Long: "files-with-matches", Help: "print only names of FILEs with selected lines"},
+			{Name: "files-without-match", Short: 'L', Long: "files-without-match", Help: "print only names of FILEs with no selected lines"},
+			{Name: "recursive", Short: 'r', ShortAliases: []rune{'R'}, Long: "recursive", Help: "read all files under each directory, recursively"},
+			{Name: "word-regexp", Short: 'w', Long: "word-regexp", Help: "select only whole words"},
+			{Name: "line-regexp", Short: 'x', Long: "line-regexp", Help: "select only whole lines"},
+			{Name: "extended-regexp", Short: 'E', Long: "extended-regexp", Help: "interpret PATTERNS as extended regular expressions"},
+			{Name: "fixed-strings", Short: 'F', Long: "fixed-strings", Help: "interpret PATTERNS as fixed strings"},
+			{Name: "perl-regexp", Short: 'P', Long: "perl-regexp", Help: "interpret PATTERNS as Perl-compatible regular expressions"},
+			{Name: "only-matching", Short: 'o', Long: "only-matching", Help: "show only the part of a line matching PATTERNS"},
+			{Name: "no-filename", Short: 'h', Long: "no-filename", Help: "suppress the file name prefix on output"},
+			{Name: "quiet", Short: 'q', Long: "quiet", Aliases: []string{"silent"}, HelpAliases: []string{"silent"}, Help: "suppress all normal output"},
+			{Name: "regexp", Short: 'e', Arity: OptionRequiredValue, ValueName: "PATTERNS", Help: "use PATTERNS for matching"},
+			{Name: "max-count", Short: 'm', Long: "max-count", Arity: OptionRequiredValue, ValueName: "NUM", Help: "stop after NUM selected lines"},
+			{Name: "after-context", Short: 'A', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of trailing context"},
+			{Name: "before-context", Short: 'B', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of leading context"},
+			{Name: "context", Short: 'C', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of output context"},
+		},
+		Args: []ArgSpec{
+			{Name: "arg", ValueName: "ARG", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:         true,
+			GroupShortOptions:        true,
+			ShortOptionValueAttached: true,
+			LongOptionValueEquals:    true,
+			AutoHelp:                 true,
+		},
+	}
+}
+
+func (c *Grep) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts, files, err := parseGrepMatches(inv, matches)
 	if err != nil {
 		return err
 	}
@@ -105,150 +149,71 @@ func (c *Grep) Run(ctx context.Context, inv *Invocation) error {
 	return &ExitError{Code: 1}
 }
 
-func parseGrepArgs(inv *Invocation) (grepOptions, []string, error) {
-	args := inv.Args
+func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []string, error) {
 	var opts grepOptions
 
-	for len(args) > 0 {
-		arg := args[0]
-		if arg == "--" {
-			args = args[1:]
-			break
-		}
-		if !strings.HasPrefix(arg, "-") || arg == "-" {
-			break
-		}
-
-		switch {
-		case arg == "-i" || arg == "--ignore-case":
+	for _, name := range matches.OptionOrder() {
+		switch name {
+		case "ignore-case":
 			opts.ignoreCase = true
-		case arg == "-n" || arg == "--line-number":
+		case "line-number":
 			opts.lineNumber = true
-		case arg == "-v" || arg == "--invert-match":
+		case "invert-match":
 			opts.invert = true
-		case arg == "-c" || arg == "--count":
+		case "count":
 			opts.count = true
-		case arg == "-l" || arg == "--files-with-matches":
+		case "files-with-matches":
 			opts.listFiles = true
-		case arg == "-L" || arg == "--files-without-match":
+		case "files-without-match":
 			opts.filesWithoutMatch = true
-		case arg == "-r" || arg == "-R" || arg == "--recursive":
+		case "recursive":
 			opts.recursive = true
-		case arg == "-w" || arg == "--word-regexp":
+		case "word-regexp":
 			opts.wordRegexp = true
-		case arg == "-x" || arg == "--line-regexp":
+		case "line-regexp":
 			opts.lineRegexp = true
-		case arg == "-E" || arg == "--extended-regexp":
-		case arg == "-F" || arg == "--fixed-strings":
+		case "extended-regexp":
+			// accepted for compatibility; default regexp engine already handles the current surface
+		case "fixed-strings":
 			opts.fixedStrings = true
-		case arg == "-P" || arg == "--perl-regexp":
+		case "perl-regexp":
 			opts.perlRegexp = true
-		case arg == "-o" || arg == "--only-matching":
+		case "only-matching":
 			opts.onlyMatching = true
-		case arg == "-h" || arg == "--no-filename":
+		case "no-filename":
 			opts.noFilename = true
-		case arg == "-q" || arg == "--quiet" || arg == "--silent":
+		case "quiet":
 			opts.quiet = true
-		case arg == "-e":
-			if len(args) < 2 {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: missing pattern")
-			}
-			opts.pattern = args[1]
-			args = args[2:]
-			continue
-		case arg == "-m":
-			if len(args) < 2 {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: option requires an argument -- 'm'")
-			}
-			value, err := parseGrepFlagInt(args[1])
+		case "regexp":
+			opts.pattern = matches.Value("regexp")
+		case "max-count":
+			value, err := parseGrepFlagInt(matches.Value("max-count"))
 			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid max count %q", args[1])
+				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid max count %q", matches.Value("max-count"))
 			}
 			opts.maxCount = value
-			args = args[2:]
-			continue
-		case strings.HasPrefix(arg, "-m") && len(arg) > 2:
-			value, err := parseGrepFlagInt(arg[2:])
+		case "after-context":
+			value, err := parseGrepFlagInt(matches.Value("after-context"))
 			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid max count %q", arg[2:])
+				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid context length %q", matches.Value("after-context"))
 			}
-			opts.maxCount = value
-		case strings.HasPrefix(arg, "--max-count="):
-			value, err := parseGrepFlagInt(strings.TrimPrefix(arg, "--max-count="))
+			setGrepContext(&opts, "-A", value)
+		case "before-context":
+			value, err := parseGrepFlagInt(matches.Value("before-context"))
 			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid max count %q", strings.TrimPrefix(arg, "--max-count="))
+				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid context length %q", matches.Value("before-context"))
 			}
-			opts.maxCount = value
-		case arg == "--max-count":
-			if len(args) < 2 {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: option requires an argument -- max-count")
-			}
-			value, err := parseGrepFlagInt(args[1])
+			setGrepContext(&opts, "-B", value)
+		case "context":
+			value, err := parseGrepFlagInt(matches.Value("context"))
 			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid max count %q", args[1])
+				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid context length %q", matches.Value("context"))
 			}
-			opts.maxCount = value
-			args = args[2:]
-			continue
-		case arg == "-A" || arg == "-B" || arg == "-C":
-			if len(args) < 2 {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: option requires an argument -- %s", strings.TrimPrefix(arg, "-"))
-			}
-			value, err := parseGrepFlagInt(args[1])
-			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid context length %q", args[1])
-			}
-			setGrepContext(&opts, arg, value)
-			args = args[2:]
-			continue
-		case len(arg) > 2 && (strings.HasPrefix(arg, "-A") || strings.HasPrefix(arg, "-B") || strings.HasPrefix(arg, "-C")):
-			value, err := parseGrepFlagInt(arg[2:])
-			if err != nil {
-				return grepOptions{}, nil, exitf(inv, 2, "grep: invalid context length %q", arg[2:])
-			}
-			setGrepContext(&opts, arg[:2], value)
-		case len(arg) > 2 && arg[0] == '-' && arg[1] != '-':
-			for _, flag := range arg[1:] {
-				switch flag {
-				case 'i':
-					opts.ignoreCase = true
-				case 'n':
-					opts.lineNumber = true
-				case 'v':
-					opts.invert = true
-				case 'c':
-					opts.count = true
-				case 'l':
-					opts.listFiles = true
-				case 'L':
-					opts.filesWithoutMatch = true
-				case 'r', 'R':
-					opts.recursive = true
-				case 'w':
-					opts.wordRegexp = true
-				case 'x':
-					opts.lineRegexp = true
-				case 'E':
-				case 'F':
-					opts.fixedStrings = true
-				case 'P':
-					opts.perlRegexp = true
-				case 'o':
-					opts.onlyMatching = true
-				case 'h':
-					opts.noFilename = true
-				case 'q':
-					opts.quiet = true
-				default:
-					return grepOptions{}, nil, exitf(inv, 2, "grep: unsupported flag -%c", flag)
-				}
-			}
-		default:
-			return grepOptions{}, nil, exitf(inv, 2, "grep: unsupported flag %s", arg)
+			setGrepContext(&opts, "-C", value)
 		}
-		args = args[1:]
 	}
 
+	args := matches.Args("arg")
 	if opts.pattern == "" {
 		if len(args) == 0 {
 			return grepOptions{}, nil, exitf(inv, 2, "grep: missing pattern")
@@ -588,3 +553,5 @@ func (c *Grep) walkRecursive(ctx context.Context, inv *Invocation, currentAbs st
 }
 
 var _ Command = (*Grep)(nil)
+var _ SpecProvider = (*Grep)(nil)
+var _ ParsedRunner = (*Grep)(nil)

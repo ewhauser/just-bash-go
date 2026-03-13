@@ -13,10 +13,8 @@ import (
 type Pwd struct{}
 
 type pwdOptions struct {
-	logical     bool
-	physical    bool
-	showHelp    bool
-	showVersion bool
+	logical  bool
+	physical bool
 }
 
 func NewPwd() *Pwd {
@@ -28,19 +26,41 @@ func (c *Pwd) Name() string {
 }
 
 func (c *Pwd) Run(ctx context.Context, inv *Invocation) error {
-	opts, err := parsePwdArgs(inv)
-	if err != nil {
-		return err
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Pwd) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "pwd",
+		About: "Print the full filename of the current working directory.",
+		Usage: "pwd [OPTION]...",
+		Options: []OptionSpec{
+			{Name: "logical", Short: 'L', Long: "logical", Help: "use PWD from environment, even if it contains symlinks"},
+			{Name: "physical", Short: 'P', Long: "physical", Help: "avoid all symlinks"},
+			{Name: "help", Long: "help", Help: "display this help and exit"},
+			{Name: "version", Long: "version", Help: "output version information and exit"},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:      true,
+			GroupShortOptions:     true,
+			StopAtFirstPositional: true,
+		},
+		VersionRenderer: func(w io.Writer, _ CommandSpec) error {
+			_, err := io.WriteString(w, pwdVersionText)
+			return err
+		},
 	}
-	if opts.showHelp {
-		_, _ = io.WriteString(inv.Stdout, pwdHelpText)
-		return nil
+}
+
+func (c *Pwd) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	if matches.Has("help") {
+		return RenderCommandHelp(inv.Stdout, &matches.Spec)
 	}
-	if opts.showVersion {
-		_, _ = io.WriteString(inv.Stdout, pwdVersionText)
-		return nil
+	if matches.Has("version") {
+		return RenderCommandVersion(inv.Stdout, &matches.Spec)
 	}
 
+	opts := parsePwdMatches(matches)
 	cwd, err := resolvePwdOutput(ctx, inv, opts)
 	if err != nil {
 		return exitf(inv, 1, "pwd: failed to get current directory: %s", pwdErrorDetail(err))
@@ -51,90 +71,11 @@ func (c *Pwd) Run(ctx context.Context, inv *Invocation) error {
 	return nil
 }
 
-func parsePwdArgs(inv *Invocation) (pwdOptions, error) {
-	opts := pwdOptions{}
-	args := append([]string(nil), inv.Args...)
-
-	for len(args) > 0 {
-		arg := args[0]
-		switch {
-		case arg == "--":
-			args = args[1:]
-			goto done
-		case arg == "--help":
-			opts.showHelp = true
-			return opts, nil
-		case arg == "--version":
-			opts.showVersion = true
-			return opts, nil
-		case strings.HasPrefix(arg, "--"):
-			match, err := matchPwdLongOption(inv, strings.TrimPrefix(arg, "--"))
-			if err != nil {
-				return pwdOptions{}, err
-			}
-			switch match {
-			case "logical":
-				opts.logical = true
-			case "physical":
-				opts.physical = true
-			case "help":
-				opts.showHelp = true
-				return opts, nil
-			case "version":
-				opts.showVersion = true
-				return opts, nil
-			}
-			args = args[1:]
-		case arg == "-" || !strings.HasPrefix(arg, "-"):
-			goto done
-		default:
-			args = args[1:]
-			for _, ch := range arg[1:] {
-				switch ch {
-				case 'L':
-					opts.logical = true
-				case 'P':
-					opts.physical = true
-				default:
-					return pwdOptions{}, pwdUsageError(inv, fmt.Sprintf("pwd: invalid option -- '%c'", ch))
-				}
-			}
-		}
+func parsePwdMatches(matches *ParsedCommand) pwdOptions {
+	return pwdOptions{
+		logical:  matches.Has("logical"),
+		physical: matches.Has("physical"),
 	}
-
-done:
-	if len(args) != 0 {
-		return pwdOptions{}, exitf(inv, 1, "pwd: unexpected arguments")
-	}
-	return opts, nil
-}
-
-func matchPwdLongOption(inv *Invocation, name string) (string, error) {
-	candidates := []string{"help", "logical", "physical", "version"}
-	for _, candidate := range candidates {
-		if candidate == name {
-			return candidate, nil
-		}
-	}
-
-	var matches []string
-	for _, candidate := range candidates {
-		if strings.HasPrefix(candidate, name) {
-			matches = append(matches, candidate)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return "", pwdUsageError(inv, fmt.Sprintf("pwd: unrecognized option '--%s'", name))
-	case 1:
-		return matches[0], nil
-	default:
-		return "", pwdUsageError(inv, fmt.Sprintf("pwd: option '--%s' is ambiguous", name))
-	}
-}
-
-func pwdUsageError(inv *Invocation, message string) error {
-	return exitf(inv, 1, "%s\nTry 'pwd --help' for more information.", message)
 }
 
 func resolvePwdOutput(ctx context.Context, inv *Invocation, opts pwdOptions) (string, error) {
@@ -206,15 +147,6 @@ func pwdErrorDetail(err error) string {
 	}
 	return err.Error()
 }
-
-const pwdHelpText = `Usage: pwd [OPTION]...
-Print the full filename of the current working directory.
-
-  -L, --logical   use PWD from environment, even if it contains symlinks
-  -P, --physical  avoid all symlinks
-      --help      display this help and exit
-      --version   output version information and exit
-`
 
 const pwdVersionText = `pwd (gbash)
 `
