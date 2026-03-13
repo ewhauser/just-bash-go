@@ -54,6 +54,7 @@ const (
 type OptionSpec struct {
 	Name                    string
 	Short                   rune
+	ShortAliases            []rune
 	Long                    string
 	Aliases                 []string
 	Help                    string
@@ -421,6 +422,9 @@ func matchShortOption(spec *CommandSpec, short rune) (*OptionSpec, bool) {
 	for i := range spec.Options {
 		opt := &spec.Options[i]
 		if opt.Short == short {
+			return opt, true
+		}
+		if slices.Contains(opt.ShortAliases, short) {
 			return opt, true
 		}
 	}
