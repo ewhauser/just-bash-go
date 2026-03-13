@@ -150,8 +150,7 @@ func (c *Curl) NormalizeInvocation(inv *Invocation) *Invocation {
 	}
 	normalized := make([]string, 0, len(inv.Args)+4)
 	args := inv.Args
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	for i, arg := range args {
 		if arg == "--" {
 			normalized = append(normalized, arg)
 			normalized = append(normalized, args[i+1:]...)
@@ -363,7 +362,7 @@ func curlNextMatchValue(values map[string][]string, indexes map[string]int, name
 	return values[name][valueIndex]
 }
 
-func splitCurlAttachedShort(arg string) (string, string, bool) {
+func splitCurlAttachedShort(arg string) (option, value string, ok bool) {
 	if len(arg) <= 2 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
 		return "", "", false
 	}
@@ -375,7 +374,7 @@ func splitCurlAttachedShort(arg string) (string, string, bool) {
 	}
 }
 
-func curlMissingValueFallback(arg string) (string, bool) {
+func curlMissingValueFallback(arg string) (fallback string, ok bool) {
 	switch arg {
 	case "-X", "--request":
 		return "GET", true
