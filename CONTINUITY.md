@@ -14,6 +14,8 @@ Constraints/Assumptions:
 - Active source of scope: `TODO.md` ("Legacy Option Parser Migration").
 - User requested no pauses for guidance; proceed autonomously through the list.
 - User requested that each command in the ledger be its own checklist item; do not group commands.
+- User requested color support be added while migrating `ls`.
+- User clarified that `ls` / `dir` should not stop at a supported subset; close the gap toward full uutils/coreutils parity as part of this migration.
 - `implement-uutils-command` skill is available in `.agents/skills/implement-uutils-command/SKILL.md`.
 - `command` skill referenced by `AGENTS.md` is missing from `.agents/skills`; fallback is direct repo inspection.
 
@@ -21,6 +23,8 @@ Key decisions:
 - Treat the TODO list order as the execution order unless blocked.
 - Track TODO progress in this ledger with checklist bullets.
 - Use direct repo inspection for the missing `command` skill guidance.
+- Implement `ls` / `dir` color support through the shared `dircolors` tables and `LS_COLORS` parsing instead of a one-off palette.
+- Do not commit `ls` / `dir` on partial parity; use the local uutils snapshot as the option/behavior source of truth for the remaining gap analysis.
 
 State:
 - Status: active
@@ -28,7 +32,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `tail` complete; preparing commit and moving to `ls` / `dir`
+- Current verification gate: `tail` committed as `b984159`; `ls` / `dir` are verified and ready to commit
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -94,19 +98,52 @@ Done:
 - Verified explicit GNU compatibility tests `tests/tail/tail.pl,tests/tail/tail-c.sh,tests/tail/tail-n0f.sh,tests/tail/retry.sh,tests/tail/follow-stdin.sh,tests/tail/follow-name.sh,tests/tail/pid.sh,tests/tail/pid-pipe.sh,tests/tail/debug.sh,tests/tail/truncate.sh,tests/tail/pipe-f.sh,tests/tail/pipe-f2.sh,tests/tail/start-middle.sh,tests/tail/F-vs-missing.sh,tests/tail/F-vs-rename.sh,tests/tail/F-headers.sh,tests/tail/descriptor-vs-rename.sh,tests/tail/overlay-headers.sh,tests/tail/wait.sh'` passed for all runnable cases via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/tail/tail.pl,tests/tail/tail-c.sh,tests/tail/tail-n0f.sh,tests/tail/retry.sh,tests/tail/follow-stdin.sh,tests/tail/follow-name.sh,tests/tail/pid.sh,tests/tail/pid-pipe.sh,tests/tail/debug.sh,tests/tail/truncate.sh,tests/tail/pipe-f.sh,tests/tail/pipe-f2.sh,tests/tail/start-middle.sh,tests/tail/F-vs-missing.sh,tests/tail/F-vs-rename.sh,tests/tail/F-headers.sh,tests/tail/descriptor-vs-rename.sh,tests/tail/overlay-headers.sh,tests/tail/wait.sh'` with `debug.sh` and `tail-n0f.sh` skipped by the harness.
 - Verified `go test ./...` passed after the `tail` migration.
 - Verified `make lint` passed after the `tail` migration.
+- Committed `tail` migration as `b984159`.
+- Rewrote `ls` / `dir` onto `CommandSpec` / `RunParsed(...)` and added initial `--color[=WHEN]` plus `LS_COLORS` support.
+- Added runtime coverage for `ls` short `-h`, `ls` color output, and `dir` version/color handling.
+- Verified `go test ./runtime -run 'TestLS|TestDir'` passed.
+- Verified `go test ./...` passed with the current `ls` / `dir` rewrite.
+- Verified `make lint` passed with the current `ls` / `dir` rewrite.
+- Verified a curated GNU `ls` subset `tests/ls/no-arg.sh,tests/ls/a-option.sh,tests/ls/classify.sh,tests/ls/recursive.sh,tests/ls/color-ext.sh,tests/ls/rt-1.sh` passed.
+- User then clarified that this is not sufficient and `ls` / `dir` should continue toward full uutils/coreutils parity before commit.
+- Expanded `ls` / `dir` again toward parity with additional parser and renderer support for format selection (`-C`, `-x`, `-m`, `--format`), filtering (`--hide`, `--ignore`, `-B`), indicator styles (`-p`, `--file-type`, `--indicator-style`, `--classify=WHEN`), richer sort modes (`-U`, `-v`, `-X`, `--sort`, `--group-directories-first`), quoting/control-char modes (`-N`, `-b`, `-Q`, `-q`, `--show-control-chars`, `--quoting-style`), width handling, and `--zero`.
+- Added runtime coverage for the broader `ls` / `dir` parity slice above.
+- Re-verified `go test ./runtime -run 'TestLS|TestDir'` passed after the broader parity slice.
+- Re-verified `make lint` passed after the broader parity slice by redirecting caches into the workspace.
+- Verified wider GNU `ls` subsets passed after the broader parity slice:
+- `tests/ls/no-arg.sh,tests/ls/a-option.sh,tests/ls/classify.sh,tests/ls/recursive.sh,tests/ls/color-ext.sh,tests/ls/rt-1.sh,tests/ls/m-option.sh,tests/ls/x-option.sh,tests/ls/zero-option.sh,tests/ls/group-dirs.sh,tests/ls/file-type.sh,tests/ls/w-option.sh`
+- `tests/ls/color-term.sh,tests/ls/color-norm.sh,tests/ls/dangle.sh,tests/ls/root-rel-symlink-color.sh,tests/ls/symlink-quote.sh` with `tests/ls/ls-misc.pl` skipped by the harness
+- `tests/ls/inode.sh,tests/ls/block-size.sh,tests/ls/ls-time.sh,tests/ls/size-align.sh,tests/ls/follow-slink.sh,tests/ls/symlink-slash.sh,tests/ls/stat-failed.sh`
+- Repo-wide `go test ./...` is no longer a clean signal in this environment because unrelated `network` and `runtime` curl tests panic when `httptest` tries to bind `[::1]:0` under the current sandbox restrictions.
+- Expanded `ls` again with long-format metadata and sizing/time parser support: `-i` / `--inode`, `-s` / `--size`, `-k` / `--kibibytes`, `--si`, `--block-size`, `-g`, `-o`, `-n` / `--numeric-uid-gid`, `-G` / `--no-group`, `--author`, `--time-style`, `--full-time`, plus parser support for `-H`, `-L`, and `--dereference-command-line-symlink-to-dir`.
+- Added runtime coverage for the new long-format metadata, block-size, and time-style behaviors.
+- Re-verified `go test ./runtime -run 'TestLS|TestDir'`, `go test ./...`, and `make lint` passed after the long-format tranche.
+- Re-verified GNU `ls` subsets covering inode, block-size, time-style, width, and file-type output passed: `tests/ls/inode.sh,tests/ls/block-size.sh,tests/ls/ls-time.sh,tests/ls/size-align.sh,tests/ls/w-option.sh,tests/ls/file-type.sh,tests/ls/time-style-diag.sh`.
+- Re-ran the full local GNU `tests/ls` batch and it passed all runnable cases: 42 pass / 5 skip / 0 fail.
+- Added parser and output support for `ls --hyperlink[=WHEN]` with runtime coverage for OSC 8 hyperlink output.
+- Re-verified `go test ./runtime -run 'TestLS|TestDir'`, `go test ./...`, and `make lint` passed after the hyperlink tranche.
+- Finished the remaining `ls` / `dir` parity tranche by adding `--dired` parsing/output, order-sensitive `--dired` vs `--hyperlink` / format handling, `--dired` / `--zero` incompatibility, URL-encoded hyperlink targets, and long-format symlink `name -> target` rendering.
+- Switched directory entry loading to `lstat` by default so `ls` long-format symlink handling and dired metadata work without unintended traversal.
+- Added runtime coverage for `ls --dired`, `--dired` / `--hyperlink` order semantics, `--dired --zero` failure, and dired symlink target offsets.
+- Re-verified `go test ./runtime -run 'TestLS|TestDir'` passed after the dired/hyperlink tranche.
+- Re-verified `go test ./...` passed after the dired/hyperlink tranche.
+- Re-verified `make lint` passed after the dired/hyperlink tranche.
+- Verified explicit GNU compatibility tests `tests/ls/dired.sh,tests/ls/hyperlink.sh` passed via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/ls/dired.sh,tests/ls/hyperlink.sh'`.
+- Re-ran the full local GNU `tests/ls` batch after the dired/hyperlink tranche and it again passed all runnable cases: 42 pass / 5 skip / 0 fail.
 
 Now:
-- Commit the completed `tail` migration.
-- Move to `ls` / `dir`, then run their repo and GNU compatibility gates.
+- Commit `ls` and `dir` now that the parser migration and verification stack are complete.
+- Start the next unchecked TODO item, `basename`, immediately after the `ls` / `dir` commit.
 
 Next:
-- Migrate `ls` / `dir`.
-- Keep committing each completed command item before moving to the next TODO entry.
+- Continue committing each completed command item before moving to the next TODO entry.
+- After the `ls` / `dir` commit, inspect `commands/basename.go` and the matching uutils/coreutils implementation/tests to begin the next migration.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: No dedicated GNU test file for `base32` alone was found; `tests/basenc/base64.pl` appears to be the shared GNU compatibility test covering both `base32` and `base64`.
 - UNCONFIRMED: No GNU coreutils compatibility harness target exists for `bash` / `sh`; verification for those commands relies on repo runtime/CLI coverage instead.
 - No GNU coreutils compatibility harness target exists for `gzip` / `gunzip` / `zcat`; verification for those commands relies on repo runtime coverage plus full-repo test/lint gates.
+- No dedicated GNU `dir` compatibility test target has been found in the local coreutils tree; `dir` verification currently relies on repo runtime coverage and shared `ls` behavior checks.
 
 Working set (files/ids/commands):
 - File: `CONTINUITY.md`
@@ -124,6 +161,9 @@ Working set (files/ids/commands):
 - File: `commands/tail.go`
 - File: `commands/ls.go`
 - File: `commands/dir.go`
+- File: `commands/color_data.go`
+- File: `commands/dircolors.go`
+- File: `runtime/ls_command_parity_test.go`
 - File: `shell/mvdan.go`
 - File: `internal/compatrun/runner_test.go`
 - File: `runtime/process_helper_commands_test.go`
@@ -166,8 +206,8 @@ Migration checklist:
 - [x] `zcat`
 - [x] `head`
 - [x] `tail`
-- [ ] `ls`
-- [ ] `dir`
+- [x] `ls`
+- [x] `dir`
 - [ ] `basename`
 - [ ] `cat`
 - [ ] `chmod`
