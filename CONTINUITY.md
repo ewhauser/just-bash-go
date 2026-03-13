@@ -32,7 +32,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `tail` committed as `b984159`; `ls` / `dir` are verified and ready to commit
+- Current verification gate: `ls` / `dir` committed as `42f10fd`; `basename` is verified and ready to commit
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -130,14 +130,23 @@ Done:
 - Re-verified `make lint` passed after the dired/hyperlink tranche.
 - Verified explicit GNU compatibility tests `tests/ls/dired.sh,tests/ls/hyperlink.sh` passed via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/ls/dired.sh,tests/ls/hyperlink.sh'`.
 - Re-ran the full local GNU `tests/ls` batch after the dired/hyperlink tranche and it again passed all runnable cases: 42 pass / 5 skip / 0 fail.
+- Committed `ls` / `dir` migration as `42f10fd`.
+- Rewrote `basename` onto `CommandSpec` / `RunParsed(...)`.
+- Preserved GNU/uutils simple-format parsing where the first positional stops option parsing and the second positional becomes a suffix unless `-a` / `--multiple` or `-s` / `--suffix` selected multi-name mode.
+- Added inferred long-option support for `basename` (`--mul`, `--suf`, `--ze`) and explicit help/version flags `-h` / `-V`.
+- Added runtime coverage for `basename` help/version, inferred long options, simple-format suffix handling, and special paths such as `/.`, `hello/.`, `///`, and the empty string.
+- Verified `go test ./runtime -run 'TestBasename'` passed.
+- Verified explicit GNU compatibility test `tests/misc/basename.pl` passed via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/misc/basename.pl'`.
+- Verified `go test ./...` passed after the `basename` migration.
+- Verified `make lint` passed after the `basename` migration.
 
 Now:
-- Commit `ls` and `dir` now that the parser migration and verification stack are complete.
-- Start the next unchecked TODO item, `basename`, immediately after the `ls` / `dir` commit.
+- Commit `basename` now that the parser migration and verification stack are complete.
+- Start the next unchecked TODO item, `cat`, immediately after the `basename` commit.
 
 Next:
 - Continue committing each completed command item before moving to the next TODO entry.
-- After the `ls` / `dir` commit, inspect `commands/basename.go` and the matching uutils/coreutils implementation/tests to begin the next migration.
+- After the `basename` commit, inspect `commands/cat.go` and the matching uutils/coreutils implementation/tests to begin the next migration.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: No dedicated GNU test file for `base32` alone was found; `tests/basenc/base64.pl` appears to be the shared GNU compatibility test covering both `base32` and `base64`.
@@ -208,7 +217,7 @@ Migration checklist:
 - [x] `tail`
 - [x] `ls`
 - [x] `dir`
-- [ ] `basename`
+- [x] `basename`
 - [ ] `cat`
 - [ ] `chmod`
 - [ ] `chown`
