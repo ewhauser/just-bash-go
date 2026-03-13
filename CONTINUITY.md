@@ -28,7 +28,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `head` complete; preparing commit and moving to `tail`
+- Current verification gate: `tail` complete; preparing commit and moving to `ls` / `dir`
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -85,13 +85,22 @@ Done:
 - Verified explicit GNU compatibility tests `tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl` passed for all runnable cases via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl'` with `head-write-error.sh` skipped by the harness.
 - Verified `go test ./...` passed after the `head` migration.
 - Verified `make lint` passed after the `head` migration.
+- Committed `head` migration as `0a5f70c`.
+- Rewrote `tail` onto `CommandSpec` / `RunParsed(...)`.
+- Preserved `tail` parser quirks by normalizing legacy `-NUM`, preserving the current `--lines=+N` behavior as plain line count rather than from-line mode, and remapping `---disable-inotify` onto a spec option.
+- Kept existing follow/retry/pid/debug runtime behavior intact while moving only the parsing layer.
+- Verified `go test ./runtime -run 'TestTail|TestHeadAndTailSupportLongByteAndHeaderFlags'` passed.
+- Verified `go test ./cmd/gbash -run 'TestRunCLICompatExecTail'` passed.
+- Verified explicit GNU compatibility tests `tests/tail/tail.pl,tests/tail/tail-c.sh,tests/tail/tail-n0f.sh,tests/tail/retry.sh,tests/tail/follow-stdin.sh,tests/tail/follow-name.sh,tests/tail/pid.sh,tests/tail/pid-pipe.sh,tests/tail/debug.sh,tests/tail/truncate.sh,tests/tail/pipe-f.sh,tests/tail/pipe-f2.sh,tests/tail/start-middle.sh,tests/tail/F-vs-missing.sh,tests/tail/F-vs-rename.sh,tests/tail/F-headers.sh,tests/tail/descriptor-vs-rename.sh,tests/tail/overlay-headers.sh,tests/tail/wait.sh'` passed for all runnable cases via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/tail/tail.pl,tests/tail/tail-c.sh,tests/tail/tail-n0f.sh,tests/tail/retry.sh,tests/tail/follow-stdin.sh,tests/tail/follow-name.sh,tests/tail/pid.sh,tests/tail/pid-pipe.sh,tests/tail/debug.sh,tests/tail/truncate.sh,tests/tail/pipe-f.sh,tests/tail/pipe-f2.sh,tests/tail/start-middle.sh,tests/tail/F-vs-missing.sh,tests/tail/F-vs-rename.sh,tests/tail/F-headers.sh,tests/tail/descriptor-vs-rename.sh,tests/tail/overlay-headers.sh,tests/tail/wait.sh'` with `debug.sh` and `tail-n0f.sh` skipped by the harness.
+- Verified `go test ./...` passed after the `tail` migration.
+- Verified `make lint` passed after the `tail` migration.
 
 Now:
-- Commit the completed `head` migration.
-- Move to `tail`, then run its repo and GNU compatibility gates.
+- Commit the completed `tail` migration.
+- Move to `ls` / `dir`, then run their repo and GNU compatibility gates.
 
 Next:
-- Migrate `tail`.
+- Migrate `ls` / `dir`.
 - Keep committing each completed command item before moving to the next TODO entry.
 
 Open questions (UNCONFIRMED if needed):
@@ -113,6 +122,8 @@ Working set (files/ids/commands):
 - File: `commands/head.go`
 - File: `commands/command_spec.go`
 - File: `commands/tail.go`
+- File: `commands/ls.go`
+- File: `commands/dir.go`
 - File: `shell/mvdan.go`
 - File: `internal/compatrun/runner_test.go`
 - File: `runtime/process_helper_commands_test.go`
@@ -139,6 +150,9 @@ Working set (files/ids/commands):
 - Command: `go test ./runtime -run 'TestGzip|TestGunzip'`
 - Command: `go test ./runtime -run 'TestHead'`
 - Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl'`
+- Command: `go test ./runtime -run 'TestTail|TestHeadAndTailSupportLongByteAndHeaderFlags'`
+- Command: `go test ./cmd/gbash -run 'TestRunCLICompatExecTail'`
+- Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/tail/tail.pl,tests/tail/tail-c.sh,tests/tail/tail-n0f.sh,tests/tail/retry.sh,tests/tail/follow-stdin.sh,tests/tail/follow-name.sh,tests/tail/pid.sh,tests/tail/pid-pipe.sh,tests/tail/debug.sh,tests/tail/truncate.sh,tests/tail/pipe-f.sh,tests/tail/pipe-f2.sh,tests/tail/start-middle.sh,tests/tail/F-vs-missing.sh,tests/tail/F-vs-rename.sh,tests/tail/F-headers.sh,tests/tail/descriptor-vs-rename.sh,tests/tail/overlay-headers.sh,tests/tail/wait.sh'`
 
 Migration checklist:
 - [x] `base32`
@@ -151,7 +165,7 @@ Migration checklist:
 - [x] `gunzip`
 - [x] `zcat`
 - [x] `head`
-- [ ] `tail`
+- [x] `tail`
 - [ ] `ls`
 - [ ] `dir`
 - [ ] `basename`
