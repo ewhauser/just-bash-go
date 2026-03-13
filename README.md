@@ -356,32 +356,11 @@ The repo is a Go workspace. The root module has the runtime, CLI, and core comma
 
 ### local comparison benchmark
 
-The repo also includes a standalone local benchmark that compares `gbash` against `just-bash` without relying on any external harness.
-
-Prerequisites:
-
-- Go installed and available on `PATH`
-- Node.js with `npx` available on `PATH`
-
 Run the benchmark from the repo root:
 
 ```bash
 make bench-compare
 ```
-
-Useful overrides:
-
-- `BENCH_COMPARE_RUNS=250` changes the number of cold sequential trials per scenario.
-- `JUST_BASH_SPEC=just-bash@2.13.0` pins or overrides the `npx` package spec used for `just-bash`.
-- `JSON_OUT=/tmp/bench-compare.json` writes raw trial timings and summary stats to a JSON file.
-
-Example:
-
-```bash
-make bench-compare BENCH_COMPARE_RUNS=250 JSON_OUT=/tmp/bench-compare.json
-```
-
-The benchmark is intentionally local/manual for now. It performs an untimed `npx --yes just-bash@2.13.0 --version` cache prime before measuring any trials so package download time does not pollute the reported numbers.
 
 Sample local results from March 13, 2026, using the default 100 runs:
 
@@ -390,7 +369,7 @@ Sample local results from March 13, 2026, using the default 100 runs:
 | `startup_echo` | `5.08ms` | `6.86ms` | `618.94ms` | `956.86ms` |
 | `workspace_inventory` | `18.50ms` | `51.81ms` | `618.30ms` | `725.79ms` |
 
-These numbers are a local reference point, not a portability guarantee. Re-run `make bench-compare` on your own machine for current results.
+These numbers are a local reference point, not a portability guarantee. Startup comparisons may not be fully apples to apples yet, because `just-bash` currently embeds tools like Python in its base container and `gbash` does not.
 
 ### coreutils compatibility
 
