@@ -63,12 +63,10 @@ type utilityTotals struct {
 }
 
 type utilityResult struct {
-	Name     string      `json:"name"`
-	Inactive bool        `json:"inactive,omitempty"`
-	Skipped  []string    `json:"skipped,omitempty"`
-	Summary  testSummary `json:"summary"`
-	LogFile  string      `json:"log_file,omitempty"`
-	Reason   string      `json:"reason,omitempty"`
+	Name    string      `json:"name"`
+	Skipped []string    `json:"skipped,omitempty"`
+	Summary testSummary `json:"summary"`
+	LogFile string      `json:"log_file,omitempty"`
 }
 
 type indexView struct {
@@ -93,7 +91,6 @@ type renderedUtilityTotals struct {
 
 type indexUtilityRow struct {
 	Name         string
-	RowClass     string
 	Percent      string
 	PercentClass string
 	Selected     string
@@ -158,8 +155,10 @@ func loadSummary(path string) (*runSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
 	var summary runSummary
-	if err := json.Unmarshal(data, &summary); err != nil {
+	if err := decoder.Decode(&summary); err != nil {
 		return nil, err
 	}
 	return &summary, nil
@@ -240,8 +239,6 @@ func summarizeRenderedUtilities(results []utilityResult) renderedUtilityTotals {
 	for i := range results {
 		summary := results[i].Summary
 		switch {
-		case results[i].Inactive:
-			continue
 		case summary.SelectedTotal == 0:
 			totals.Empty++
 		case summary.RunnableTotal == 0:
@@ -262,17 +259,16 @@ func buildUtilityRows(results []utilityResult) []indexUtilityRow {
 		result := &results[i]
 		rows = append(rows, indexUtilityRow{
 			Name:         result.Name,
-			RowClass:     utilityRowClass(result.Inactive),
 			Percent:      utilityPercentText(result),
 			PercentClass: utilityPercentClass(result),
-			Selected:     countOrDash(result.Summary.SelectedTotal, result.Inactive),
-			Pass:         countOrDash(result.Summary.Pass, result.Inactive),
-			Fail:         countOrDash(result.Summary.Fail, result.Inactive),
-			Skip:         countOrDash(result.Summary.Skip, result.Inactive),
-			XFail:        countOrDash(result.Summary.XFail, result.Inactive),
-			XPass:        countOrDash(result.Summary.XPass, result.Inactive),
-			Error:        countOrDash(result.Summary.Error, result.Inactive),
-			Unreported:   countOrDash(result.Summary.Unreported, result.Inactive),
+			Selected:     fmt.Sprintf("%d", result.Summary.SelectedTotal),
+			Pass:         fmt.Sprintf("%d", result.Summary.Pass),
+			Fail:         fmt.Sprintf("%d", result.Summary.Fail),
+			Skip:         fmt.Sprintf("%d", result.Summary.Skip),
+			XFail:        fmt.Sprintf("%d", result.Summary.XFail),
+			XPass:        fmt.Sprintf("%d", result.Summary.XPass),
+			Error:        fmt.Sprintf("%d", result.Summary.Error),
+			Unreported:   fmt.Sprintf("%d", result.Summary.Unreported),
 			LogFile:      result.LogFile,
 			Notes:        utilityNoteText(result),
 		})
@@ -281,9 +277,6 @@ func buildUtilityRows(results []utilityResult) []indexUtilityRow {
 }
 
 func utilityPercentText(result *utilityResult) string {
-	if result.Inactive {
-		return "-"
-	}
 	if result.Summary.RunnableTotal == 0 {
 		return "n/a"
 	}
@@ -291,27 +284,11 @@ func utilityPercentText(result *utilityResult) string {
 }
 
 func utilityPercentClass(result *utilityResult) string {
-	if result.Inactive {
-		return "na"
-	}
 	return percentageClass(result.Summary.RunnableTotal, result.Summary.PassPctRunnable)
-}
-
-func utilityRowClass(inactive bool) string {
-	if inactive {
-		return "inactive"
-	}
-	return ""
 }
 
 func utilityNoteText(result *utilityResult) string {
 	var notes []string
-	if result.Reason != "" {
-		notes = append(notes, result.Reason)
-	}
-	if result.Inactive {
-		return strings.Join(notes, "; ")
-	}
 	if result.Summary.SelectedTotal > 0 && result.Summary.RunnableTotal == 0 {
 		notes = append(notes, "all selected tests skipped")
 	}
@@ -358,13 +335,6 @@ func formatPercentOrNA(value float64, na bool) string {
 		return "n/a"
 	}
 	return formatPercent(value)
-}
-
-func countOrDash(value int, inactive bool) string {
-	if inactive {
-		return "-"
-	}
-	return fmt.Sprintf("%d", value)
 }
 
 func formatPercent(value float64) string {

@@ -181,49 +181,6 @@ func TestSummariesComputePercentagesAndRollups(t *testing.T) {
 	}
 }
 
-func TestCompleteUtilityResultsAddsInactivePlaceholders(t *testing.T) {
-	results := []utilityResult{
-		{
-			Name:   "basename",
-			Passed: true,
-			Summary: testSummary{
-				SelectedTotal:   1,
-				Pass:            1,
-				RunnableTotal:   1,
-				PassPctSelected: 100,
-				PassPctRunnable: 100,
-			},
-		},
-	}
-	programs := []string{"base32", "basename", "expr"}
-	manifestUtilities := []utilityManifest{{Name: "basename"}, {Name: "cat"}}
-	selectedUtilities := []utilityManifest{{Name: "basename"}}
-	supportedSet := map[string]struct{}{
-		"base32":   {},
-		"basename": {},
-	}
-
-	got := completeUtilityResults(results, programs, manifestUtilities, selectedUtilities, supportedSet)
-	if len(got) != 3 {
-		t.Fatalf("completeUtilityResults() len = %d, want 3", len(got))
-	}
-	if got[0].Name != "base32" || !got[0].Inactive {
-		t.Fatalf("base32 row = %#v, want inactive placeholder", got[0])
-	}
-	if got[0].Reason != "implemented in gbash, but not included in the compatibility manifest" {
-		t.Fatalf("base32 reason = %q", got[0].Reason)
-	}
-	if got[1].Name != "basename" || got[1].Inactive {
-		t.Fatalf("basename row = %#v, want active result", got[1])
-	}
-	if got[2].Name != "expr" || !got[2].Inactive {
-		t.Fatalf("expr row = %#v, want inactive placeholder", got[2])
-	}
-	if got[2].Reason != "not currently covered by the compatibility manifest" {
-		t.Fatalf("expr reason = %q", got[2].Reason)
-	}
-}
-
 func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 	mf, err := loadManifest()
 	if err != nil {
@@ -488,16 +445,12 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 		t.Fatalf("WriteFile(gbashBin) error = %v", err)
 	}
 
-	err := prepareProgramDir(workDir, gbashBin, []string{"sort", "expr"}, map[string]struct{}{
-		"bash": {},
-		"sh":   {},
-		"sort": {},
-	})
+	err := prepareProgramDir(workDir, gbashBin, []string{"sort", "futuregnu"})
 	if err != nil {
 		t.Fatalf("prepareProgramDir() error = %v", err)
 	}
 
-	for _, name := range []string{"bash", "sh"} {
+	for _, name := range []string{"bash", "futuregnu", "ginstall", "sh", "sort"} {
 		path := filepath.Join(srcDir, name)
 		info, err := os.Lstat(path)
 		if err != nil {
@@ -511,29 +464,8 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(gnu-programs.txt) error = %v", err)
 	}
-	if got := string(data); got != "expr\nsort\n" {
+	if got := string(data); got != "futuregnu\nsort\n" {
 		t.Fatalf("gnu-programs.txt = %q, want sorted reserved program list", got)
-	}
-}
-
-func TestImplementedGNUProgramSetIncludesHelperCommands(t *testing.T) {
-	supported := implementedGNUProgramSet()
-	for _, name := range []string{"base32", "base64", "expr", "b2sum", "sha224sum", "sha384sum", "sha512sum"} {
-		if _, ok := supported[name]; !ok {
-			t.Fatalf("implementedGNUProgramSet() missing %q", name)
-		}
-	}
-	if _, ok := supported["definitely-not-a-command"]; ok {
-		t.Fatalf("implementedGNUProgramSet() unexpectedly included unknown command")
-	}
-}
-
-func TestImplementedGNUProgramSetExcludesNotImplementedPlaceholders(t *testing.T) {
-	supported := implementedGNUProgramSet()
-	for _, name := range []string{"truncate"} {
-		if _, ok := supported[name]; ok {
-			t.Fatalf("implementedGNUProgramSet() unexpectedly included placeholder %q", name)
-		}
 	}
 }
 func TestPrepareWorkDirPreservesFileTimes(t *testing.T) {

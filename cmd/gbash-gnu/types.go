@@ -55,7 +55,6 @@ type testSummary struct {
 
 type utilityResult struct {
 	Name         string       `json:"name"`
-	Inactive     bool         `json:"inactive,omitempty"`
 	Tests        []string     `json:"tests"`
 	Skipped      []string     `json:"skipped,omitempty"`
 	TestResults  []testResult `json:"test_results,omitempty"`
@@ -65,7 +64,6 @@ type utilityResult struct {
 	Passed       bool         `json:"passed"`
 	LogFile      string       `json:"log_file,omitempty"`
 	LogPath      string       `json:"log_path,omitempty"`
-	Reason       string       `json:"reason,omitempty"`
 }
 
 type utilityTotals struct {

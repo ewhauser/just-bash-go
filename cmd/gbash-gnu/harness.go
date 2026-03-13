@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	gbcommands "github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/internal/compatshims"
 )
 
@@ -25,50 +24,28 @@ func listGNUPrograms(ctx context.Context, workDir string) ([]string, error) {
 	return lines, nil
 }
 
-func prepareProgramDir(workDir, gbashBin string, programs []string, supported map[string]struct{}) error {
+func prepareProgramDir(workDir, gbashBin string, programs []string) error {
 	srcDir := filepath.Join(workDir, "src")
-	supportedNames := make([]string, 0)
-	unsupportedNames := make([]string, 0)
 	for _, name := range programs {
 		if err := os.RemoveAll(filepath.Join(srcDir, name)); err != nil {
 			return err
 		}
-		if _, ok := supported[name]; ok {
-			supportedNames = append(supportedNames, name)
-		} else {
-			unsupportedNames = append(unsupportedNames, name)
-		}
 	}
-	if err := compatshims.SymlinkCommands(srcDir, gbashBin, supportedNames); err != nil {
+	if err := compatshims.SymlinkCommands(srcDir, gbashBin, programs); err != nil {
 		return err
 	}
-	if err := compatshims.WriteUnsupportedStubs(srcDir, unsupportedNames); err != nil {
-		return err
-	}
-	helperShells := compatHelperShells(supported)
+	helperShells := compatHelperShells()
 	if err := compatshims.SymlinkCommands(srcDir, gbashBin, helperShells); err != nil {
 		return err
 	}
-	if _, ok := supported["install"]; ok {
-		if err := compatshims.SymlinkCommands(srcDir, gbashBin, []string{"ginstall"}); err != nil {
-			return err
-		}
-	} else {
-		if err := compatshims.WriteUnsupportedStubs(srcDir, []string{"ginstall"}); err != nil {
-			return err
-		}
+	if err := compatshims.SymlinkCommands(srcDir, gbashBin, []string{"ginstall"}); err != nil {
+		return err
 	}
 	return writeGNUProgramList(workDir, programs)
 }
 
-func compatHelperShells(supported map[string]struct{}) []string {
-	names := make([]string, 0, 2)
-	for _, name := range []string{"bash", "sh"} {
-		if _, ok := supported[name]; ok {
-			names = append(names, name)
-		}
-	}
-	return names
+func compatHelperShells() []string {
+	return []string{"bash", "sh"}
 }
 
 func compatConfigShellPath(workDir string) (string, error) {
@@ -77,22 +54,6 @@ func compatConfigShellPath(workDir string) (string, error) {
 		return "", fmt.Errorf("prepare compat config shell: %w", err)
 	}
 	return path, nil
-}
-
-func implementedGNUProgramSet() map[string]struct{} {
-	supported := make(map[string]struct{})
-	registry := gbcommands.DefaultRegistry()
-	for _, name := range registry.Names() {
-		cmd, ok := registry.Lookup(name)
-		if !ok {
-			continue
-		}
-		if _, placeholder := cmd.(*gbcommands.NotImplemented); placeholder {
-			continue
-		}
-		supported[name] = struct{}{}
-	}
-	return supported
 }
 
 func writeGNUProgramList(workDir string, programs []string) error {
