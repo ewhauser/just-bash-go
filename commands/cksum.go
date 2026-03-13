@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 
-	sm3hash "github.com/emmansun/gmsm/sm3"
 	"github.com/ewhauser/gbash/policy"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/sha3"
@@ -93,6 +92,7 @@ type cksumCheckStats struct {
 	failedChecksum  int
 	failedOpen      int
 	badFormat       int
+	unsupportedAlgo int
 	totalConsidered int
 }
 
@@ -104,6 +104,7 @@ const (
 	cksumLineFailedChecksum
 	cksumLineFailedOpen
 	cksumLineIgnoredMissing
+	cksumLineUnsupportedAlgorithm
 	cksumLineOK
 )
 
@@ -253,6 +254,9 @@ func (c *Cksum) optionsFromMatches(inv *Invocation, matches *ParsedCommand) (cks
 	}
 
 	if algo != nil {
+		if !algo.isSupported() {
+			return cksumOptions{}, exitf(inv, 1, "cksum: %s is not supported", algo.tagLabel())
+		}
 		finalAlgo, err := sanitizeCksumLength(inv, *algo, lengthValue)
 		if err != nil {
 			return cksumOptions{}, err
@@ -398,6 +402,10 @@ func parseCksumAlgorithm(value string) (cksumAlgorithm, error) {
 
 func (a cksumAlgorithm) isLegacy() bool {
 	return a.family == cksumSysv || a.family == cksumBsd || a.family == cksumCRC || a.family == cksumCRC32B
+}
+
+func (a cksumAlgorithm) isSupported() bool {
+	return a.family != cksumSM3
 }
 
 func (a cksumAlgorithm) tagLabel() string {
@@ -681,9 +689,6 @@ func computeCksumDigest(algo cksumAlgorithm, data []byte) (digest []byte, size i
 		}
 		_, _ = h.Write(data)
 		return h.Sum(nil), len(data), nil
-	case cksumSM3:
-		sum := sm3hash.Sum(data)
-		return sum[:], len(data), nil
 	case cksumShake128:
 		outBits := algo.bits
 		if outBits == 0 {
@@ -765,6 +770,9 @@ func (c *Cksum) verifyChecksumList(ctx context.Context, inv *Invocation, opts ck
 			stats.failedOpen++
 		case cksumLineIgnoredMissing:
 			stats.totalConsidered++
+		case cksumLineUnsupportedAlgorithm:
+			stats.totalConsidered++
+			stats.unsupportedAlgo++
 		case cksumLineOK:
 			stats.totalConsidered++
 			stats.correct++
@@ -795,6 +803,13 @@ func (c *Cksum) verifyChecksumList(ctx context.Context, inv *Invocation, opts ck
 			}
 			_, _ = fmt.Fprintf(inv.Stderr, "cksum: WARNING: %d %s\n", stats.failedOpen, unit)
 		}
+		if stats.unsupportedAlgo > 0 {
+			unit := "checksum line uses"
+			if stats.unsupportedAlgo != 1 {
+				unit = "checksum lines use"
+			}
+			_, _ = fmt.Fprintf(inv.Stderr, "cksum: WARNING: %d %s unsupported algorithms\n", stats.unsupportedAlgo, unit)
+		}
 	}
 	if opts.ignoreMissing && stats.correct == 0 {
 		if verbosity > cksumVerbosityStatus {
@@ -809,6 +824,9 @@ func (c *Cksum) verifyChecksumList(ctx context.Context, inv *Invocation, opts ck
 		return &ExitError{Code: 1}
 	}
 	if stats.failedOpen > 0 && !opts.ignoreMissing {
+		return &ExitError{Code: 1}
+	}
+	if stats.unsupportedAlgo > 0 {
 		return &ExitError{Code: 1}
 	}
 	return nil
@@ -832,6 +850,10 @@ func (c *Cksum) processChecksumLine(ctx context.Context, inv *Invocation, opts c
 	}
 
 	name := checksumUnescapeFilename(line.filename)
+	if !line.algo.isSupported() {
+		_, _ = fmt.Fprintf(inv.Stderr, "cksum: %s: %s is not supported\n", name, line.algo.tagLabel())
+		return cksumLineUnsupportedAlgorithm
+	}
 	data, err := c.readVerifyTarget(ctx, inv, name)
 	if err != nil {
 		if policy.IsDenied(err) {

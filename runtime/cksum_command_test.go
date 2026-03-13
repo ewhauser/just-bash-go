@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	sm3hash "github.com/emmansun/gmsm/sm3"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/sha3"
 )
@@ -41,7 +40,6 @@ func TestCksumModernOutputModesAndLengths(t *testing.T) {
 	data := []byte("mode-data")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
 
-	sm3sum := sm3hash.Sum(data)
 	shake128 := sha3.NewShake128()
 	_, _ = shake128.Write(data)
 	shakeOut := make([]byte, 20)
@@ -56,7 +54,6 @@ func TestCksumModernOutputModesAndLengths(t *testing.T) {
 		{"md5-tagged", "cksum -a md5 /tmp/input.txt\n", fmt.Sprintf("MD5 (/tmp/input.txt) = %s\n", md5Hex(data))},
 		{"md5-untagged-binary", "cksum -a md5 --untagged --binary /tmp/input.txt\n", fmt.Sprintf("%s */tmp/input.txt\n", md5Hex(data))},
 		{"md5-base64", "cksum -a md5 --base64 /tmp/input.txt\n", fmt.Sprintf("MD5 (/tmp/input.txt) = %s\n", base64.StdEncoding.EncodeToString(mustHexDecode(t, md5Hex(data))))},
-		{"sm3", "cksum -a sm3 /tmp/input.txt\n", fmt.Sprintf("SM3 (/tmp/input.txt) = %x\n", sm3sum)},
 		{"sha2-256", "cksum -a sha2 -l 256 /tmp/input.txt\n", fmt.Sprintf("SHA256 (/tmp/input.txt) = %s\n", sha256Hex(data))},
 		{"blake2b-128", "cksum -a blake2b -l 128 /tmp/input.txt\n", fmt.Sprintf("BLAKE2b-128 (/tmp/input.txt) = %s\n", b2HexSized(data, 16))},
 		{"shake128-156", "cksum -a shake128 -l 156 /tmp/input.txt\n", fmt.Sprintf("SHAKE128 (/tmp/input.txt) = %x\n", shakeOut)},
@@ -82,6 +79,7 @@ func TestCksumCheckModeAndValidation(t *testing.T) {
 	writeSessionFile(t, session, "/tmp/md5.sum", fmt.Appendf(nil, "MD5 (/tmp/input.txt) = %s\n", md5Hex(data)))
 	writeSessionFile(t, session, "/tmp/sha256.sum", fmt.Appendf(nil, "%s  /tmp/input.txt\n", sha256Hex(data)))
 	writeSessionFile(t, session, "/tmp/sha256b64.sum", fmt.Appendf(nil, "SHA256 (/tmp/input.txt) = %s\n", base64.StdEncoding.EncodeToString(mustHexDecode(t, sha256Hex(data)))))
+	writeSessionFile(t, session, "/tmp/sm3.sum", []byte("SM3 (/tmp/input.txt) = 0000000000000000000000000000000000000000000000000000000000000000\n"))
 
 	tests := []struct {
 		name   string
@@ -95,6 +93,8 @@ func TestCksumCheckModeAndValidation(t *testing.T) {
 		{"base64", "cksum --check /tmp/sha256b64.sum\n", "/tmp/input.txt: OK\n", "", true},
 		{"text-without-untagged", "cksum --algorithm=md5 --text /tmp/input.txt\n", "", "cksum: --text mode is only supported with --untagged\n", false},
 		{"legacy-check", "cksum --algorithm=crc --check /tmp/input.txt\n", "", "cksum: --check is not supported with --algorithm={bsd,sysv,crc,crc32b}\n", false},
+		{"sm3-unsupported", "cksum --algorithm=sm3 /tmp/input.txt\n", "", "cksum: SM3 is not supported\n", false},
+		{"sm3-check-unsupported", "cksum --check /tmp/sm3.sum\n", "", "cksum: /tmp/input.txt: SM3 is not supported\ncksum: WARNING: 1 checksum line uses unsupported algorithms\n", false},
 		{"sha2-missing-length", "cksum --algorithm=sha2 /tmp/input.txt\n", "", "cksum: --algorithm=sha2 requires specifying --length 224, 256, 384, or 512\n", false},
 		{"raw-multiple", "cksum --algorithm=md5 --raw /tmp/input.txt /tmp/input.txt\n", "", "cksum: the --raw option is not supported with multiple files\n", false},
 		{"blake2b-length", "cksum --algorithm=blake2b --length=513 /tmp/input.txt\n", "", "cksum: invalid length: '513'\ncksum: maximum digest length for 'BLAKE2b' is 512 bits\n", false},
