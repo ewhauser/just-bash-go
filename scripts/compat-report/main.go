@@ -19,8 +19,6 @@ var templateFS embed.FS
 
 var indexTemplate = htmltemplate.Must(htmltemplate.New("index.html.tmpl").Funcs(htmltemplate.FuncMap{
 	"formatPercent":   formatPercent,
-	"bucketCounts":    bucketCounts,
-	"bucketSegments":  bucketSegments,
 	"testStatusClass": testStatusClass,
 }).ParseFS(templateFS, "templates/index.html.tmpl"))
 
@@ -138,9 +136,11 @@ type coverageBucket struct {
 }
 
 type categoryResult struct {
-	Name    string         `json:"name"`
-	Summary coverageBucket `json:"summary"`
-	Tests   []suiteTest    `json:"tests,omitempty"`
+	Name     string            `json:"name"`
+	Summary  coverageBucket    `json:"summary"`
+	Tests    []suiteTest       `json:"tests,omitempty"`
+	Counts   string            `json:"-"`
+	Segments []progressSegment `json:"-"`
 }
 
 type commandCoverage struct {
@@ -239,10 +239,12 @@ func loadSummary(path string) (*runSummary, error) {
 	if err := decoder.Decode(&summary); err != nil {
 		return nil, err
 	}
+	prepareSummaryView(&summary)
 	return &summary, nil
 }
 
 func writeReport(outputDir string, summary *runSummary) error {
+	prepareSummaryView(summary)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
@@ -274,6 +276,13 @@ func renderIndex(summary *runSummary) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func prepareSummaryView(summary *runSummary) {
+	for i := range summary.Categories {
+		summary.Categories[i].Counts = bucketCounts(&summary.Categories[i].Summary)
+		summary.Categories[i].Segments = bucketSegments(&summary.Categories[i].Summary)
+	}
 }
 
 func renderBadge(summary *runSummary) ([]byte, error) {
@@ -323,18 +332,11 @@ func badgeColor(summary *runSummary) string {
 	}
 }
 
-func formatPercentOrNA(value float64, na bool) string {
-	if na {
-		return "n/a"
-	}
-	return formatPercent(value)
-}
-
-func bucketCounts(bucket coverageBucket) string {
+func bucketCounts(bucket *coverageBucket) string {
 	return fmt.Sprintf("%d / %d / %d", bucket.Pass, bucket.Skip+bucket.FilteredTotal+bucket.XFail, bucket.Fail+bucket.Error+bucket.XPass+bucket.Unreported)
 }
 
-func bucketSegments(bucket coverageBucket) []progressSegment {
+func bucketSegments(bucket *coverageBucket) []progressSegment {
 	total := bucket.SelectedTotal
 	if total == 0 {
 		return nil
@@ -360,55 +362,6 @@ func bucketSegments(bucket coverageBucket) []progressSegment {
 	return out
 }
 
-func bucketClass(bucket coverageBucket) string {
-	if bucket.SelectedTotal == 0 {
-		return "na"
-	}
-	if bucket.RunnableTotal == 0 {
-		return "warn"
-	}
-	switch {
-	case bucket.PassPctRunnable >= 90:
-		return "good"
-	case bucket.PassPctRunnable >= 70:
-		return "warn"
-	default:
-		return "bad"
-	}
-}
-
-func commandNotes(command commandCoverage) string {
-	var notes []string
-	switch command.CoverageState {
-	case "shared-only":
-		notes = append(notes, "shared coverage only")
-	case "filtered-only":
-		notes = append(notes, "all attributed tests filtered")
-	case "empty":
-		notes = append(notes, "no attributed coverage")
-	}
-	if command.Shared.SelectedTotal > 0 && command.CoverageState == "primary" {
-		notes = append(notes, fmt.Sprintf("%d shared tests", command.Shared.SelectedTotal))
-	}
-	if command.Primary.FilteredTotal > 0 && command.CoverageState == "primary" {
-		notes = append(notes, fmt.Sprintf("%d primary tests filtered", command.Primary.FilteredTotal))
-	}
-	return strings.Join(notes, "; ")
-}
-
-func stateClass(state string) string {
-	switch state {
-	case "primary":
-		return "good"
-	case "shared-only":
-		return "warn"
-	case "filtered-only":
-		return "warn"
-	default:
-		return "na"
-	}
-}
-
 func testStatusClass(status string, filtered bool) string {
 	if filtered {
 		return "warn"
@@ -427,17 +380,6 @@ func testStatusClass(status string, filtered bool) string {
 	}
 }
 
-func attributionLabel(attributions []testAttribution) string {
-	if len(attributions) == 0 {
-		return "unmapped"
-	}
-	parts := make([]string, 0, len(attributions))
-	for _, attribution := range attributions {
-		parts = append(parts, attribution.Command+" ("+attribution.Kind+")")
-	}
-	return strings.Join(parts, ", ")
-}
-
 func formatPercent(value float64) string {
 	if value == 0 {
 		return "0%"
@@ -448,13 +390,6 @@ func formatPercent(value float64) string {
 	formatted := fmt.Sprintf("%.2f", value)
 	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
 	return formatted + "%"
-}
-
-func percentage(numerator, denominator float64) float64 {
-	if denominator == 0 {
-		return 0
-	}
-	return math.Round((numerator/denominator)*10000) / 100
 }
 
 func fatalf(format string, args ...any) {

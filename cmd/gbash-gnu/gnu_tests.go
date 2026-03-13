@@ -200,17 +200,6 @@ func shouldSkipUtilityTest(rel string, utilitySkips []string) (skip bool, reason
 	return false, ""
 }
 
-func isRunnableTestFile(rel string, info os.FileInfo) bool {
-	switch filepath.Ext(rel) {
-	case ".log", ".trs":
-		return false
-	case ".sh", ".pl", ".xpl":
-		return true
-	default:
-		return info.Mode()&0o111 != 0
-	}
-}
-
 var makeVarRefPattern = regexp.MustCompile(`\$\(([^)]+)\)`)
 
 func discoverAuthoritativeTests(workDir string) ([]string, error) {
@@ -226,7 +215,7 @@ func discoverAuthoritativeTests(workDir string) ([]string, error) {
 	}
 
 	tests := make([]string, 0)
-	for _, field := range strings.Fields(expanded) {
+	for field := range strings.FieldsSeq(expanded) {
 		field = filepath.ToSlash(strings.TrimSpace(field))
 		if !strings.HasPrefix(field, "tests/") {
 			continue
@@ -276,13 +265,13 @@ func parseMakeVariables(contents string) map[string]string {
 			return
 		}
 		if appendValue {
-			vars[name] = vars[name] + value
+			vars[name] += value
 			return
 		}
 		vars[name] = value
 	}
 
-	for _, rawLine := range strings.Split(contents, "\n") {
+	for rawLine := range strings.SplitSeq(contents, "\n") {
 		line := strings.TrimRight(rawLine, "\r")
 		trimmed := strings.TrimSpace(line)
 		if logical.Len() == 0 && (trimmed == "" || strings.HasPrefix(trimmed, "#")) {

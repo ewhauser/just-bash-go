@@ -353,9 +353,9 @@ func parseSkippedEntries(entries []string) map[string]string {
 
 func splitSkippedEntry(entry string) (name, reason string) {
 	name = entry
-	if idx := strings.Index(entry, ": "); idx >= 0 {
-		name = entry[:idx]
-		reason = entry[idx+2:]
+	if before, after, ok := strings.Cut(entry, ": "); ok {
+		name = before
+		reason = after
 	}
 	return name, reason
 }
@@ -505,7 +505,7 @@ func defaultPrimaryOwner(path string, knownCommands map[string]struct{}, mf *man
 func miscPrimaryOwner(path string, knownCommands map[string]struct{}) (string, bool) {
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	candidates := []string{base}
-	if trimmed := strings.TrimSuffix(base, "-status"); trimmed != base {
+	if trimmed, ok := strings.CutSuffix(base, "-status"); ok {
 		candidates = append(candidates, trimmed)
 	}
 	for _, candidate := range candidates {
@@ -668,7 +668,8 @@ func summarizeCoverageDebt(commands []commandCoverage, tests []suiteTest, extras
 		ExtraReportedTotal: len(extras),
 	}
 	primaryRunnableCommands := 0
-	for _, command := range commands {
+	for i := range commands {
+		command := &commands[i]
 		switch command.CoverageState {
 		case "primary":
 			debt.PrimaryCoveredCommands++

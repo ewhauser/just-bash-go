@@ -221,9 +221,9 @@ details.group summary::-webkit-details-marker {
           <summary>
             <div class="summary-row">
               <strong class="mono">{{ .Name }}</strong>
-              <span class="mono counts">{{ bucketCounts .Summary }}</span>
+              <span class="mono counts">{{ .Counts }}</span>
               <div class="progress" aria-hidden="true">
-                {{- range bucketSegments .Summary }}
+                {{- range .Segments }}
                 <span class="progress-segment {{ .Class }}" style="width: {{ .Width }}"></span>
                 {{- end }}
               </div>
