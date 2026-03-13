@@ -1020,6 +1020,25 @@ func TestUptimeDefaultSincePrettyAndVersion(t *testing.T) {
 	if got, want := versionResult.Stdout, "uptime (gbash)\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
+
+	helpResult, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "uptime --help\nuptime --ver\nuptime --sin\n",
+	})
+	if err != nil {
+		t.Fatalf("Run(help) error = %v", err)
+	}
+	if helpResult.ExitCode != 0 {
+		t.Fatalf("help ExitCode = %d, want 0; stderr=%q", helpResult.ExitCode, helpResult.Stderr)
+	}
+	if !strings.Contains(helpResult.Stdout, "Usage: uptime [OPTION]... [FILE]") {
+		t.Fatalf("Stdout = %q, want help usage", helpResult.Stdout)
+	}
+	if !strings.Contains(helpResult.Stdout, "uptime (gbash)\n") {
+		t.Fatalf("Stdout = %q, want inferred version output", helpResult.Stdout)
+	}
+	if !regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n$`).MatchString(helpResult.Stdout) {
+		t.Fatalf("Stdout = %q, want inferred --since output", helpResult.Stdout)
+	}
 }
 
 func TestUptimeReadsBootTimeAndUsersFromUtmpFile(t *testing.T) {
