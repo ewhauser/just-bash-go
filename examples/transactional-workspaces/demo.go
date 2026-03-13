@@ -199,7 +199,7 @@ func (d scriptedDemo) restoreMain(ctx context.Context, snapshotName string) erro
 		return err
 	}
 	d.block(tree)
-	d.success("The workspace is back to the exact pre-run state without any cleanup script archaeology.")
+	d.success("The workspace is back to the exact pre-run state without any cleanup script archeology.")
 	return nil
 }
 
@@ -276,10 +276,15 @@ func (d scriptedDemo) compareBranches(ctx context.Context, snapshotName string) 
 	}
 
 	d.command("workspace compare fix-filter keep-everything")
-	d.block(strings.Join([]string{
-		fmt.Sprintf("fix-filter: kept rows=%s, rule=%s, mutations=%d", fixRows, fixRule, countMutations(fixResult.Events)),
-		fmt.Sprintf("keep-everything: kept rows=%s, rule=%s, mutations=%d", keepRows, keepRule, countMutations(keepResult.Events)),
-	}, "\n"))
+	d.block(fmt.Sprintf(
+		"fix-filter: kept rows=%s, rule=%s, mutations=%d\nkeep-everything: kept rows=%s, rule=%s, mutations=%d",
+		fixRows,
+		fixRule,
+		countMutations(fixResult.Events),
+		keepRows,
+		keepRule,
+		countMutations(keepResult.Events),
+	))
 
 	d.command("workspace diff " + snapshotName + " --workspace fix-filter")
 	fixDiff, err := d.manager.renderDiffAgainstSnapshot(ctx, snapshotName, "fix-filter")
@@ -617,7 +622,7 @@ func (m *workspaceManager) runFile(ctx context.Context, workspaceName, name, fil
 	return m.run(ctx, workspaceName, name, script)
 }
 
-func (m *workspaceManager) replaceInFile(ctx context.Context, workspaceName, filePath, old, new string) error {
+func (m *workspaceManager) replaceInFile(ctx context.Context, workspaceName, filePath, old, replacement string) error {
 	workspace, ok := m.workspaces[workspaceName]
 	if !ok {
 		return fmt.Errorf("unknown workspace %q", workspaceName)
@@ -629,16 +634,16 @@ func (m *workspaceManager) replaceInFile(ctx context.Context, workspaceName, fil
 	if !strings.Contains(current, old) {
 		return fmt.Errorf("%s does not contain %q", filePath, strings.TrimSpace(old))
 	}
-	updated := strings.Replace(current, old, new, 1)
+	updated := strings.Replace(current, old, replacement, 1)
 	return writeSandboxFile(ctx, workspace.session.FileSystem(), filePath, updated, 0o755)
 }
 
-func (m *workspaceManager) summaryMetrics(ctx context.Context, workspaceName string) (rows string, rule string, err error) {
+func (m *workspaceManager) summaryMetrics(ctx context.Context, workspaceName string) (rows, rule string, err error) {
 	content, err := m.readFile(ctx, workspaceName, "/workspace/reports/summary.md")
 	if err != nil {
 		return "", "", err
 	}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "- kept rows:"):
@@ -958,7 +963,8 @@ func formatPathForDiff(name string, mode stdfs.FileMode) string {
 
 func renderMutationJournal(events []trace.Event) string {
 	var lines []string
-	for _, event := range events {
+	for i := range events {
+		event := &events[i]
 		if event.Kind != trace.EventFileMutation || event.File == nil {
 			continue
 		}
@@ -979,7 +985,8 @@ func renderMutationJournal(events []trace.Event) string {
 
 func countMutations(events []trace.Event) int {
 	total := 0
-	for _, event := range events {
+	for i := range events {
+		event := &events[i]
 		if event.Kind == trace.EventFileMutation && event.File != nil {
 			total++
 		}
