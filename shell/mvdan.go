@@ -150,7 +150,7 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 
 	options := []interp.RunnerOption{
 		interp.Env(expand.ListEnviron(envPairs(exec.Env)...)),
-		interp.Dir(hostRunnerDir),
+		runnerDirOption(hostRunnerDir),
 		interp.StdIO(exec.Stdin, exec.Stdout, exec.Stderr),
 		interp.OpenHandler(m.openHandler(exec)),
 		interp.ReadDirHandler2(m.readDirHandler(exec)),
