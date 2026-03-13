@@ -55,6 +55,17 @@ need_tool() {
   }
 }
 
+run_isolated_session() {
+  # Some GNU tests exercise signal handling and can terminate their caller's
+  # process group when the command under test fails. Keep the harness tree out
+  # of the workflow shell's session so CI can still capture the exit status.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@"
+    return
+  fi
+  "$@"
+}
+
 compute_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -199,7 +210,7 @@ run_harness() {
 
   (
     cd "$REPO_ROOT"
-    "${cmd[@]}"
+    run_isolated_session "${cmd[@]}"
   )
 }
 

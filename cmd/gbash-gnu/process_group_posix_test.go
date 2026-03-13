@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func TestConfigureIsolatedProcessGroupSetsSetpgid(t *testing.T) {
+func TestConfigureIsolatedProcessGroupStartsNewSession(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "true")
 
 	configureIsolatedProcessGroup(cmd)
 
-	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
-		t.Fatalf("configureIsolatedProcessGroup() did not enable Setpgid")
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
+		t.Fatalf("configureIsolatedProcessGroup() did not enable Setsid")
 	}
 }
