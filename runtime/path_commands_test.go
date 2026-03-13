@@ -61,6 +61,145 @@ func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
 	}
 }
 
+func TestTruncateCreatesAndResizesFiles(t *testing.T) {
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/home/agent/target.txt", []byte("1234567890"))
+
+	result := mustExecSession(t, session, "truncate --size ' 4' /home/agent/target.txt\nstat -c '%s' /home/agent/target.txt\ntruncate -s +3 /home/agent/target.txt\nstat -c '%s' /home/agent/target.txt\ntruncate -o -s-1 /home/agent/negative.txt\nstat -c '%s' /home/agent/negative.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "4\n7\n0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	if got := readSessionFile(t, session, "/home/agent/target.txt"); string(got) != "1234\x00\x00\x00" {
+		t.Fatalf("target contents = %q, want %q", got, "1234\x00\x00\x00")
+	}
+	if got := readSessionFile(t, session, "/home/agent/negative.txt"); len(got) != 0 {
+		t.Fatalf("negative.txt len = %d, want 0", len(got))
+	}
+}
+
+func TestTruncateRelativeModes(t *testing.T) {
+	session := newSession(t, &Config{})
+	for _, name := range []string{"at-most.txt", "at-least.txt", "round-down.txt", "round-up.txt"} {
+		writeSessionFile(t, session, "/home/agent/"+name, []byte("1234567890"))
+	}
+
+	result := mustExecSession(t, session, "truncate --size '<4' /home/agent/at-most.txt\ntruncate --size '>15' /home/agent/at-least.txt\ntruncate --size '/4' /home/agent/round-down.txt\ntruncate --size '%4' /home/agent/round-up.txt\nstat -c '%s' /home/agent/at-most.txt /home/agent/at-least.txt /home/agent/round-down.txt /home/agent/round-up.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "4\n15\n8\n12\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestTruncateReferenceAndNoCreate(t *testing.T) {
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/home/agent/ref.txt", []byte("1234567890"))
+
+	result := mustExecSession(t, session, "truncate -r /home/agent/ref.txt /home/agent/from-ref.txt\ntruncate -c -r /home/agent/ref.txt /home/agent/no-create.txt\ntruncate -r /home/agent/ref.txt -s +5 /home/agent/from-ref-plus.txt\nstat -c '%s' /home/agent/from-ref.txt /home/agent/from-ref-plus.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "10\n15\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/no-create.txt"); !os.IsNotExist(err) {
+		t.Fatalf("Stat(no-create.txt) error = %v, want not exist", err)
+	}
+}
+
+func TestTruncateReportsErrors(t *testing.T) {
+	t.Run("missing file operand", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		result := mustExecSession(t, session, "truncate -s 1\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "missing file operand") {
+			t.Fatalf("Stderr = %q, want missing file operand", result.Stderr)
+		}
+	})
+
+	t.Run("missing size or reference", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/home/agent/file.txt", []byte("1234"))
+
+		result := mustExecSession(t, session, "truncate /home/agent/file.txt\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "you must specify either '--size' or '--reference'") {
+			t.Fatalf("Stderr = %q, want missing size/reference guidance", result.Stderr)
+		}
+	})
+
+	t.Run("invalid size", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		result := mustExecSession(t, session, "truncate -s 0B /home/agent/file.txt\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "Invalid number: '0B'") {
+			t.Fatalf("Stderr = %q, want invalid number message", result.Stderr)
+		}
+	})
+
+	t.Run("division by zero", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/home/agent/file.txt", []byte("1234"))
+
+		result := mustExecSession(t, session, "truncate -s /0 /home/agent/file.txt\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "division by zero") {
+			t.Fatalf("Stderr = %q, want division by zero", result.Stderr)
+		}
+	})
+
+	t.Run("missing reference file", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		result := mustExecSession(t, session, "truncate -r /home/agent/missing.ref /home/agent/file.txt\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "cannot stat '/home/agent/missing.ref': No such file or directory") {
+			t.Fatalf("Stderr = %q, want missing reference error", result.Stderr)
+		}
+	})
+
+	t.Run("missing parent directory", func(t *testing.T) {
+		session := newSession(t, &Config{})
+		result := mustExecSession(t, session, "truncate -s 0 /home/agent/missing/child.txt\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "cannot open '/home/agent/missing/child.txt' for writing: No such file or directory") {
+			t.Fatalf("Stderr = %q, want missing parent error", result.Stderr)
+		}
+	})
+}
+
+func TestTruncateNoCreateIgnoresMissingTargets(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "truncate -c -s 8 /home/agent/missing/child.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if result.Stdout != "" || result.Stderr != "" {
+		t.Fatalf("output = stdout %q stderr %q, want empty", result.Stdout, result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/missing/child.txt"); !os.IsNotExist(err) {
+		t.Fatalf("Stat(missing child) error = %v, want not exist", err)
+	}
+}
+
 func TestRmdirRemovesEmptyDirectoriesAndParents(t *testing.T) {
 	session := newSession(t, &Config{})
 

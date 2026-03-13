@@ -61,6 +61,47 @@ func FuzzFilePathCommands(f *testing.F) {
 	})
 }
 
+func FuzzTruncateCommand(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		name string
+		data []byte
+	}{
+		{"alpha", []byte("hello\n")},
+		{"notes-1", []byte("# title\nbody\n")},
+		{"data.bin", []byte{0x00, 0x01, 0x02, 0x03, 0xff}},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.name, seed.data)
+	}
+
+	f.Fuzz(func(t *testing.T, rawName string, rawData []byte) {
+		session := newFuzzSession(t, rt)
+		inputPath := fuzzPath(rawName) + ".txt"
+		referencePath := fuzzPath(rawName) + ".ref"
+		data := clampFuzzData(rawData)
+
+		writeSessionFile(t, session, inputPath, data)
+		writeSessionFile(t, session, referencePath, data)
+
+		script := fmt.Appendf(nil,
+			"truncate -s 0 %s\ntruncate -s +1 %s\ntruncate -s %%4 %s\ntruncate -c -s 8 %s.missing\ntruncate -r %s %s.copy\ntruncate -r %s -s +2 %s.plus\n",
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(referencePath),
+			shellQuote(inputPath),
+			shellQuote(referencePath),
+			shellQuote(inputPath),
+		)
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSecureFuzzOutcome(t, script, result, err)
+	})
+}
+
 func FuzzDirectoryTraversalCommands(f *testing.F) {
 	rt := newFuzzRuntime(f)
 
