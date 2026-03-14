@@ -10,6 +10,7 @@ type Strings struct{}
 
 type stringsOptions struct {
 	minLength    int
+	encoding     string
 	offsetFormat string
 }
 
@@ -93,6 +94,7 @@ func (c *Strings) RunParsed(ctx context.Context, inv *Invocation, matches *Parse
 func parseStringsMatches(inv *Invocation, matches *ParsedCommand) (stringsOptions, error) {
 	opts := stringsOptions{
 		minLength: 4,
+		encoding:  "s",
 	}
 	if matches.Has("min-length") {
 		minLength, err := strconv.Atoi(matches.Value("min-length"))
@@ -112,6 +114,7 @@ func parseStringsMatches(inv *Invocation, matches *ParsedCommand) (stringsOption
 	if matches.Has("encoding") {
 		switch matches.Value("encoding") {
 		case "s", "S":
+			opts.encoding = matches.Value("encoding")
 		default:
 			return stringsOptions{}, exitf(inv, 1, "strings: invalid encoding: %q", matches.Value("encoding"))
 		}
@@ -134,7 +137,7 @@ func extractStrings(data []byte, opts stringsOptions) []string {
 	}
 
 	for i, b := range data {
-		if isStringsPrintable(b) {
+		if isStringsPrintableByte(b, opts.encoding) {
 			if len(current) == 0 {
 				start = i
 			}
@@ -147,8 +150,13 @@ func extractStrings(data []byte, opts stringsOptions) []string {
 	return results
 }
 
-func isStringsPrintable(b byte) bool {
-	return b == '\t' || (b >= 32 && b <= 126)
+func isStringsPrintableByte(b byte, encoding string) bool {
+	switch encoding {
+	case "S":
+		return b == '\t' || (b >= 32 && b != 127)
+	default:
+		return b == '\t' || (b >= 32 && b <= 126)
+	}
 }
 
 func formatStringsOffset(offset int, format string) string {

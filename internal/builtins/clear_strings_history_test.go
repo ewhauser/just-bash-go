@@ -43,6 +43,25 @@ func TestStringsSupportsLengthsOffsetsAndStdin(t *testing.T) {
 	}
 }
 
+func TestStringsHonorsEightBitEncodingMode(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'ab\\351cd\\000tail\\000' > /tmp/eight.bin\n" +
+			"strings -es /tmp/eight.bin\n" +
+			"strings -eS /tmp/eight.bin\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "tail\nab\351cd\ntail\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestHistoryReadsEnvAndClearsWithinOneExecution(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
@@ -60,5 +79,46 @@ func TestHistoryReadsEnvAndClearsWithinOneExecution(t *testing.T) {
 	}
 	if got, want := result.Stdout, "    1  echo one\n    2  pwd\n    2  pwd\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestHistoryRejectsInvalidCountArguments(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name   string
+		script string
+		stderr string
+	}{
+		{
+			name: "nonnumeric",
+			script: "BASH_HISTORY='[\"echo one\"]'\n" +
+				"history abc\n",
+			stderr: "history: abc: numeric argument required\n",
+		},
+		{
+			name: "negative",
+			script: "BASH_HISTORY='[\"echo one\"]'\n" +
+				"history -- -1\n",
+			stderr: "history: -1: numeric argument required\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if got, want := result.ExitCode, 1; got != want {
+				t.Fatalf("ExitCode = %d, want %d", got, want)
+			}
+			if got := result.Stdout; got != "" {
+				t.Fatalf("Stdout = %q, want empty", got)
+			}
+			if got, want := result.Stderr, tc.stderr; got != want {
+				t.Fatalf("Stderr = %q, want %q", got, want)
+			}
+		})
 	}
 }

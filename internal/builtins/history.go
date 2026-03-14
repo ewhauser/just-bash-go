@@ -59,7 +59,11 @@ func (c *History) RunParsed(_ context.Context, inv *Invocation, matches *ParsedC
 
 	count := len(history)
 	if args := matches.Args("arg"); len(args) > 0 {
-		if n, err := strconv.Atoi(args[0]); err == nil && n >= 0 && n < count {
+		n, err := strconv.Atoi(args[0])
+		if err != nil || n < 0 {
+			return exitf(inv, 1, "history: %s: numeric argument required", args[0])
+		}
+		if n < count {
 			count = n
 		}
 	}
