@@ -58,11 +58,12 @@ type trialResult struct {
 }
 
 type runtimeReport struct {
-	Name         string        `json:"name"`
-	SuccessCount int           `json:"success_count"`
-	FailureCount int           `json:"failure_count"`
-	Stats        *latencyStats `json:"stats,omitempty"`
-	Trials       []trialResult `json:"trials"`
+	Name              string        `json:"name"`
+	ArtifactSizeBytes int64         `json:"artifact_size_bytes,omitempty"`
+	SuccessCount      int           `json:"success_count"`
+	FailureCount      int           `json:"failure_count"`
+	Stats             *latencyStats `json:"stats,omitempty"`
+	Trials            []trialResult `json:"trials"`
 }
 
 type scenarioReport struct {
@@ -92,8 +93,9 @@ type scenarioConfig struct {
 }
 
 type runtimeConfig struct {
-	Name    string
-	Command func(context.Context, *scenarioConfig) *exec.Cmd
+	Name              string
+	ArtifactSizeBytes int64
+	Command           func(context.Context, *scenarioConfig) *exec.Cmd
 }
 
 type commandResult struct {
@@ -136,7 +138,31 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err := buildGbashRunner(ctx, repoRoot, helperPath); err != nil {
 		return err
 	}
+	helperSize, err := fileSize(helperPath)
+	if err != nil {
+		return err
+	}
+	extrasPath := filepath.Join(tmpDir, executableName("gbash-extras"))
+	if err := buildGbashExtrasCLI(ctx, repoRoot, extrasPath); err != nil {
+		return err
+	}
+	extrasSize, err := fileSize(extrasPath)
+	if err != nil {
+		return err
+	}
+	wasmAssetDir := filepath.Join(tmpDir, "gbash-wasm")
+	if err := buildGbashWasmAssets(ctx, repoRoot, wasmAssetDir); err != nil {
+		return err
+	}
+	wasmSize, err := fileSize(filepath.Join(wasmAssetDir, "gbash.wasm"))
+	if err != nil {
+		return err
+	}
 	if err := primeJustBash(ctx, opts.JustBashSpec); err != nil {
+		return err
+	}
+	justBashSize, err := measureJustBashArtifactFootprint(ctx, opts.JustBashSpec, filepath.Join(tmpDir, "just-bash-install"))
+	if err != nil {
 		return err
 	}
 
@@ -147,8 +173,10 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 
 	runtimes := []runtimeConfig{
-		gbashRuntime(helperPath),
-		justBashRuntime(opts.JustBashSpec),
+		gbashRuntime(helperPath, helperSize),
+		gbashExtrasRuntime(extrasPath, extrasSize),
+		gbashNodeWasmRuntime(repoRoot, wasmAssetDir, wasmSize),
+		justBashRuntime(opts.JustBashSpec, justBashSize),
 	}
 	scenarios := []scenarioConfig{
 		{
@@ -159,8 +187,8 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		},
 		{
 			Name:           "workspace_inventory",
-			Description:    "Inventory a generated host workspace using the same command in both runtimes.",
-			Command:        "find . -type f | grep -c '^'\n",
+			Description:    "Inventory a generated host workspace with a pipe-free file count that runs on every runtime.",
+			Command:        "set -- $(find . -type f); echo $#\n",
 			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
 			Workspace:      true,
 			Fixture:        &fixture,
@@ -260,6 +288,47 @@ func buildGbashRunner(ctx context.Context, repoRoot, helperPath string) error {
 	return nil
 }
 
+func buildGbashExtrasCLI(ctx context.Context, repoRoot, outputPath string) error {
+	buildCtx, cancel := context.WithTimeout(ctx, buildTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", outputPath, "./contrib/extras/cmd/gbash-extras")
+	cmd.Dir = repoRoot
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build gbash-extras benchmark helper: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func buildGbashWasmAssets(ctx context.Context, repoRoot, assetDir string) error {
+	buildCtx, cancel := context.WithTimeout(ctx, buildTimeout)
+	defer cancel()
+
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		return fmt.Errorf("create gbash wasm asset dir: %w", err)
+	}
+
+	wasmPath := filepath.Join(assetDir, "gbash.wasm")
+	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", wasmPath, "./packages/gbash-wasm/wasm")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "GOOS=js", "GOARCH=wasm")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build gbash wasm benchmark assets: %w: %s", err, combineOutput(stdout.String(), stderr.String()))
+	}
+
+	wasmExecSrc := filepath.Join(goruntime.GOROOT(), "lib", "wasm", "wasm_exec.js")
+	wasmExecDst := filepath.Join(assetDir, "wasm_exec.js")
+	if err := copyFile(wasmExecDst, wasmExecSrc); err != nil {
+		return fmt.Errorf("copy wasm_exec.js: %w", err)
+	}
+	return nil
+}
+
 func primeJustBash(ctx context.Context, spec string) error {
 	primeCtx, cancel := context.WithTimeout(ctx, primeTimeout)
 	defer cancel()
@@ -274,9 +343,10 @@ func primeJustBash(ctx context.Context, spec string) error {
 	return nil
 }
 
-func gbashRuntime(helperPath string) runtimeConfig {
+func gbashRuntime(helperPath string, artifactSizeBytes int64) runtimeConfig {
 	return runtimeConfig{
-		Name: "gbash",
+		Name:              "gbash",
+		ArtifactSizeBytes: artifactSizeBytes,
 		Command: func(ctx context.Context, scenario *scenarioConfig) *exec.Cmd {
 			args := make([]string, 0, 6)
 			if scenario.Workspace && scenario.Fixture != nil {
@@ -288,9 +358,47 @@ func gbashRuntime(helperPath string) runtimeConfig {
 	}
 }
 
-func justBashRuntime(spec string) runtimeConfig {
+func gbashExtrasRuntime(helperPath string, artifactSizeBytes int64) runtimeConfig {
 	return runtimeConfig{
-		Name: "just-bash",
+		Name:              "gbash-extras",
+		ArtifactSizeBytes: artifactSizeBytes,
+		Command: func(ctx context.Context, scenario *scenarioConfig) *exec.Cmd {
+			args := make([]string, 0, 6)
+			if scenario.Workspace && scenario.Fixture != nil {
+				args = append(args, "--root", scenario.Fixture.Root, "--cwd", gbash.DefaultWorkspaceMountPoint)
+			}
+			args = append(args, "-c", scenario.Command)
+			return exec.CommandContext(ctx, helperPath, args...)
+		},
+	}
+}
+
+func gbashNodeWasmRuntime(repoRoot, assetDir string, artifactSizeBytes int64) runtimeConfig {
+	runnerPath := filepath.Join(repoRoot, "scripts", "bench-compare", "gbash-wasm-runner.mjs")
+	return runtimeConfig{
+		Name:              "gbash-node-wasm",
+		ArtifactSizeBytes: artifactSizeBytes,
+		Command: func(ctx context.Context, scenario *scenarioConfig) *exec.Cmd {
+			args := []string{
+				runnerPath,
+				"--wasm", filepath.Join(assetDir, "gbash.wasm"),
+				"--wasm-exec", filepath.Join(assetDir, "wasm_exec.js"),
+			}
+			if scenario.Workspace && scenario.Fixture != nil {
+				args = append(args, "--workspace", scenario.Fixture.Root, "--cwd", gbash.DefaultWorkspaceMountPoint)
+			}
+			args = append(args, "-c", scenario.Command)
+			cmd := exec.CommandContext(ctx, "node", args...)
+			cmd.Dir = repoRoot
+			return cmd
+		},
+	}
+}
+
+func justBashRuntime(spec string, artifactSizeBytes int64) runtimeConfig {
+	return runtimeConfig{
+		Name:              "just-bash",
+		ArtifactSizeBytes: artifactSizeBytes,
 		Command: func(ctx context.Context, scenario *scenarioConfig) *exec.Cmd {
 			args := []string{"--yes", spec}
 			if scenario.Workspace && scenario.Fixture != nil {
@@ -340,8 +448,9 @@ func createWorkspaceFixture(root string) (fixtureSummary, error) {
 
 func runTrials(ctx context.Context, runtime runtimeConfig, scenario *scenarioConfig, runs int) runtimeReport {
 	report := runtimeReport{
-		Name:   runtime.Name,
-		Trials: make([]trialResult, 0, runs),
+		Name:              runtime.Name,
+		ArtifactSizeBytes: runtime.ArtifactSizeBytes,
+		Trials:            make([]trialResult, 0, runs),
 	}
 	successDurations := make([]time.Duration, 0, runs)
 	for i := range runs {
@@ -464,7 +573,7 @@ func percentileIndex(length int, percentile float64) int {
 
 func renderTextReport(report benchmarkReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Independent gbash vs just-bash benchmark\n")
+	fmt.Fprintf(&b, "Independent shell benchmark\n")
 	fmt.Fprintf(&b, "Generated: %s\n", report.GeneratedAt)
 	fmt.Fprintf(&b, "Runs per scenario: %d\n", report.Runs)
 	fmt.Fprintf(&b, "just-bash spec: %s\n", report.JustBashSpec)
@@ -477,6 +586,7 @@ func renderTextReport(report benchmarkReport) string {
 		}
 		for _, result := range scenario.Results {
 			fmt.Fprintf(&b, "%s: %d/%d successful", result.Name, result.SuccessCount, result.SuccessCount+result.FailureCount)
+			fmt.Fprintf(&b, " size=%s", formatArtifactSize(result.ArtifactSizeBytes))
 			if result.Stats != nil {
 				fmt.Fprintf(
 					&b,
@@ -534,6 +644,114 @@ func writeJSONReport(path string, report benchmarkReport) error {
 		return fmt.Errorf("write JSON report: %w", err)
 	}
 	return nil
+}
+
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("stat %s: %w", path, err)
+	}
+	return info.Size(), nil
+}
+
+func measureJustBashArtifactFootprint(ctx context.Context, spec, installRoot string) (int64, error) {
+	installCtx, cancel := context.WithTimeout(ctx, primeTimeout)
+	defer cancel()
+
+	if err := os.MkdirAll(installRoot, 0o755); err != nil {
+		return 0, fmt.Errorf("create just-bash install dir: %w", err)
+	}
+
+	initCmd := exec.CommandContext(installCtx, "npm", "init", "-y")
+	initCmd.Dir = installRoot
+	var initStdout, initStderr bytes.Buffer
+	initCmd.Stdout = &initStdout
+	initCmd.Stderr = &initStderr
+	if err := initCmd.Run(); err != nil {
+		return 0, fmt.Errorf("init just-bash install workspace: %w: %s", err, combineOutput(initStdout.String(), initStderr.String()))
+	}
+
+	installCmd := exec.CommandContext(installCtx, "npm", "install", "--no-save", "--package-lock=false", spec)
+	installCmd.Dir = installRoot
+	var stdout, stderr bytes.Buffer
+	installCmd.Stdout = &stdout
+	installCmd.Stderr = &stderr
+	if err := installCmd.Run(); err != nil {
+		return 0, fmt.Errorf("install just-bash benchmark package: %w: %s", err, combineOutput(stdout.String(), stderr.String()))
+	}
+
+	size, err := directorySize(filepath.Join(installRoot, "node_modules"))
+	if err != nil {
+		return 0, err
+	}
+	nodeSize, err := nodeExecutableSize()
+	if err != nil {
+		return 0, err
+	}
+	return size + nodeSize, nil
+}
+
+func nodeExecutableSize() (int64, error) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil {
+		return 0, fmt.Errorf("locate node executable: %w", err)
+	}
+	size, err := fileSize(nodePath)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
+}
+
+func directorySize(root string) (int64, error) {
+	var total int64
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("measure directory size %s: %w", root, err)
+	}
+	return total, nil
+}
+
+func copyFile(dst, src string) error {
+	input, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = input.Close() }()
+
+	output, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return err
+	}
+	return output.Close()
+}
+
+func formatArtifactSize(value int64) string {
+	if value <= 0 {
+		return "n/a"
+	}
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := int64(unit), 0
+	for n := value / unit; n >= unit && exp < 5; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTPE"[exp])
 }
 
 func executableName(base string) string {
