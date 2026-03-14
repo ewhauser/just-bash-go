@@ -52,9 +52,9 @@ jobs:
 
           (
             cd "$BASE_DIR"
-            go test ./runtime -run=^$ -bench "$BENCH_SMOKE_REGEX" -benchmem -count="$BENCH_SMOKE_COUNT" -benchtime="$BENCH_SMOKE_TIME" > "$ARTIFACT_DIR/base.txt"
+            go test ./internal/runtime -run=^$ -bench "$BENCH_SMOKE_REGEX" -benchmem -count="$BENCH_SMOKE_COUNT" -benchtime="$BENCH_SMOKE_TIME" > "$ARTIFACT_DIR/base.txt"
           )
-          go test ./runtime -run=^$ -bench "$BENCH_SMOKE_REGEX" -benchmem -count="$BENCH_SMOKE_COUNT" -benchtime="$BENCH_SMOKE_TIME" > "$ARTIFACT_DIR/head.txt"
+          go test ./internal/runtime -run=^$ -bench "$BENCH_SMOKE_REGEX" -benchmem -count="$BENCH_SMOKE_COUNT" -benchtime="$BENCH_SMOKE_TIME" > "$ARTIFACT_DIR/head.txt"
           benchstat "$ARTIFACT_DIR/base.txt" "$ARTIFACT_DIR/head.txt" | tee "$ARTIFACT_DIR/benchstat.txt"
 
           {
