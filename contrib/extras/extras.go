@@ -1,4 +1,4 @@
-// Package extras registers all official opt-in contrib commands.
+// Package extras registers the stable opt-in contrib commands.
 package extras
 
 import (
@@ -11,7 +11,7 @@ import (
 	contribyq "github.com/ewhauser/gbash/contrib/yq"
 )
 
-// FullRegistry returns the default registry plus all official contrib commands.
+// FullRegistry returns the default registry plus the stable contrib commands.
 func FullRegistry() *commands.Registry {
 	registry := commands.DefaultRegistry()
 	if err := Register(registry); err != nil {
@@ -20,7 +20,7 @@ func FullRegistry() *commands.Registry {
 	return registry
 }
 
-// Register adds every official contrib command module to the registry.
+// Register adds every stable contrib command module to the registry.
 func Register(registry commands.CommandRegistry) error {
 	if registry == nil {
 		return nil
