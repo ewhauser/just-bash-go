@@ -41,6 +41,8 @@ type Session struct {
 
 type ExecutionRequest = commands.ExecutionRequest
 type ExecutionResult = commands.ExecutionResult
+type InteractiveRequest = commands.InteractiveRequest
+type InteractiveResult = commands.InteractiveResult
 
 func New(opts ...Option) (*Runtime, error) {
 	resolved, err := resolveConfig(opts)
