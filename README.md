@@ -173,10 +173,9 @@ For host-backed CLI runs, you can switch the filesystem mode explicitly:
 
 ```bash
 gbash --root /path/to/project --cwd /home/agent/project -c 'pwd; ls'
-gbash --readwrite-root /path/to/workdir --cwd / -c 'printf hi > ./note.txt'
 ```
 
-`--root` mounts a host directory read-only at `/home/agent/project` under an in-memory writable overlay. `--readwrite-root` mounts a host directory as sandbox `/` so writes persist back to the host, but only when that directory lives under the system temp directory. `--cwd` sets the initial sandbox working directory for either mode.
+`--root` mounts a host directory read-only at `/home/agent/project` under an in-memory writable overlay. `--cwd` sets the initial sandbox working directory.
 
 ## Configuration
 
