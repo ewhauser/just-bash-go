@@ -76,7 +76,7 @@ func TestBenchmarkScenarios(t *testing.T) {
 	}
 
 	scenarios := benchmarkScenarios(fixture)
-	if got, want := len(scenarios), 4; got != want {
+	if got, want := len(scenarios), 2; got != want {
 		t.Fatalf("len(benchmarkScenarios()) = %d, want %d", got, want)
 	}
 
@@ -85,34 +85,29 @@ func TestBenchmarkScenarios(t *testing.T) {
 		gotNames = append(gotNames, scenario.Name)
 	}
 	wantNames := []string{
-		"startup_echo_cold_start",
-		"startup_echo_warm_run",
-		"workspace_inventory_cold_start",
-		"workspace_inventory_warm_run",
+		"startup_echo",
+		"workspace_inventory",
 	}
 	if !slices.Equal(gotNames, wantNames) {
 		t.Fatalf("scenario names = %q, want %q", gotNames, wantNames)
 	}
 
-	if got, want := scenarios[0].WarmupScript, ""; got != want {
-		t.Fatalf("startup cold WarmupScript = %q, want %q", got, want)
-	}
-	if got, want := scenarios[1].WarmupScript, "true\n"; got != want {
-		t.Fatalf("startup warm WarmupScript = %q, want %q", got, want)
-	}
-	if !scenarios[2].Workspace || !scenarios[3].Workspace {
-		t.Fatalf("workspace scenarios should mount the generated fixture")
-	}
-	for _, index := range []int{2, 3} {
-		if got, want := scenarios[index].ExpectedStdout, "300\n"; got != want {
-			t.Fatalf("scenarios[%d].ExpectedStdout = %q, want %q", index, got, want)
+	for _, index := range []int{0, 1} {
+		if got, want := scenarios[index].WarmupScript, "true\n"; got != want {
+			t.Fatalf("scenarios[%d].WarmupScript = %q, want %q", index, got, want)
 		}
-		if scenarios[index].Fixture == nil {
-			t.Fatalf("scenarios[%d].Fixture = nil, want fixture summary", index)
-		}
-		if got, want := scenarios[index].Fixture.Root, fixture.Root; got != want {
-			t.Fatalf("scenarios[%d].Fixture.Root = %q, want %q", index, got, want)
-		}
+	}
+	if !scenarios[1].Workspace {
+		t.Fatalf("workspace scenario should mount the generated fixture")
+	}
+	if got, want := scenarios[1].ExpectedStdout, "300\n"; got != want {
+		t.Fatalf("workspace ExpectedStdout = %q, want %q", got, want)
+	}
+	if scenarios[1].Fixture == nil {
+		t.Fatalf("workspace Fixture = nil, want fixture summary")
+	}
+	if got, want := scenarios[1].Fixture.Root, fixture.Root; got != want {
+		t.Fatalf("workspace Fixture.Root = %q, want %q", got, want)
 	}
 }
 
@@ -123,8 +118,8 @@ func TestRenderTextReportAndJSON(t *testing.T) {
 		JustBashSpec: "just-bash@2.13.0",
 		Scenarios: []scenarioReport{
 			{
-				Name:           "startup_echo_cold_start",
-				Description:    "Cold process start plus one simple command.",
+				Name:           "startup_echo",
+				Description:    "Process start plus one simple command.",
 				Command:        "echo benchmark",
 				ExpectedStdout: "benchmark\n",
 				Results: []runtimeReport{
@@ -151,7 +146,7 @@ func TestRenderTextReportAndJSON(t *testing.T) {
 	if !strings.Contains(rendered, "Independent shell benchmark") {
 		t.Fatalf("renderTextReport() missing report title:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "[startup_echo_cold_start]") {
+	if !strings.Contains(rendered, "[startup_echo]") {
 		t.Fatalf("renderTextReport() missing scenario header:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "gbash: 2/2 successful") {
@@ -172,7 +167,7 @@ func TestRenderTextReportAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if !strings.Contains(string(data), "\"startup_echo_cold_start\"") {
+	if !strings.Contains(string(data), "\"startup_echo\"") {
 		t.Fatalf("JSON output missing scenario: %s", string(data))
 	}
 	if !strings.Contains(string(data), "\"artifact_size_bytes\": 5242880") {

@@ -424,29 +424,15 @@ func justBashRuntime(spec string, artifactSizeBytes int64) runtimeConfig {
 func benchmarkScenarios(fixture fixtureSummary) []scenarioConfig {
 	return []scenarioConfig{
 		{
-			Name:           "startup_echo_cold_start",
-			Description:    "Cold process start plus one simple command.",
-			Command:        "echo benchmark\n",
-			ExpectedStdout: "benchmark\n",
-		},
-		{
-			Name:           "startup_echo_warm_run",
-			Description:    "Same command after one untimed warm-up launch for each runtime.",
+			Name:           "startup_echo",
+			Description:    "Process start plus one simple command.",
 			Command:        "echo benchmark\n",
 			ExpectedStdout: "benchmark\n",
 			WarmupScript:   "true\n",
 		},
 		{
-			Name:           "workspace_inventory_cold_start",
-			Description:    "Cold process start plus a pipe-free workspace inventory.",
-			Command:        "set -- $(find . -type f); echo $#\n",
-			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
-			Workspace:      true,
-			Fixture:        &fixture,
-		},
-		{
-			Name:           "workspace_inventory_warm_run",
-			Description:    "Same workspace inventory after one untimed warm-up launch for each runtime.",
+			Name:           "workspace_inventory",
+			Description:    "Process start plus a pipe-free workspace inventory.",
 			Command:        "set -- $(find . -type f); echo $#\n",
 			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
 			Workspace:      true,
