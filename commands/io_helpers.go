@@ -20,7 +20,7 @@ func readAllFile(ctx context.Context, inv *Invocation, name string) (data []byte
 }
 
 func readAllStdin(inv *Invocation) ([]byte, error) {
-	data, err := io.ReadAll(inv.Stdin)
+	data, err := io.ReadAll(ReaderWithContext(inv.Context, stdinReader(inv)))
 	if err != nil {
 		return nil, &ExitError{Code: 1, Err: err}
 	}
