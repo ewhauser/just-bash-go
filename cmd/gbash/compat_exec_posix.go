@@ -39,6 +39,7 @@ func runCompatInvocation(ctx context.Context, argv0 string, inv compatInvocation
 	}
 
 	env := environMap(os.Environ())
+	env["GBASH_COMPAT_EXTERNAL_TIMEOUT"] = "1"
 	env["PATH"] = prependCommandDir(commandDir, env["PATH"])
 	runner, err := compatrun.New(&compatrun.Config{
 		Registry:          registry,

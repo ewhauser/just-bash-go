@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const timeoutExternalCompatEnv = "GBASH_COMPAT_EXTERNAL_TIMEOUT"
+
 type Timeout struct{}
 
 func NewTimeout() *Timeout {
@@ -26,6 +28,21 @@ func (c *Timeout) Run(ctx context.Context, inv *Invocation) error {
 	if err != nil {
 		return err
 	}
+	if shouldUseExternalCompatTimeout(inv) {
+		exitCode, controlMessage, err := runExternalCompatTimeout(ctx, inv, timeout, argv)
+		if err != nil {
+			return err
+		}
+		if controlMessage != "" {
+			if _, err := fmt.Fprintln(inv.Stderr, controlMessage); err != nil {
+				return &ExitError{Code: 1, Err: err}
+			}
+		}
+		if exitCode == 0 {
+			return nil
+		}
+		return &ExitError{Code: exitCode}
+	}
 	result, err := executeCommand(ctx, inv, &executeCommandOptions{
 		Argv:    argv,
 		Env:     inv.Env,
@@ -44,6 +61,17 @@ func (c *Timeout) Run(ctx context.Context, inv *Invocation) error {
 		}
 	}
 	return exitForExecutionResult(result)
+}
+
+func shouldUseExternalCompatTimeout(inv *Invocation) bool {
+	return inv != nil && inv.Env[timeoutExternalCompatEnv] == "1"
+}
+
+func timeoutControlMessage(timeout time.Duration) string {
+	if timeout <= 0 {
+		return "execution timed out"
+	}
+	return fmt.Sprintf("execution timed out after %s", timeout)
 }
 
 func parseTimeoutArgs(inv *Invocation) (timeout time.Duration, argv []string, err error) {
