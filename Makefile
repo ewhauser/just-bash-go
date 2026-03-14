@@ -1,7 +1,7 @@
 .PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish compat-docker-build compat-docker-run release-check release-snapshot
 
 GO_PACKAGES := ./... ./contrib/extras/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
-BENCH_PACKAGES := ./runtime ./cmd/gbash ./contrib/jq
+BENCH_PACKAGES := ./internal/runtime ./cmd/gbash ./contrib/jq
 
 FUZZTIME ?= 10s
 FUZZ_SMOKE_TIME ?= 3s
@@ -39,6 +39,7 @@ FUZZ_SMOKE_SHARD_PATHS := \
 
 FUZZ_SMOKE_SHARD_DATA := \
 	FuzzArchiveCommands \
+	FuzzNumfmtCommand \
 	./contrib/sqlite3:FuzzSQLiteCommands \
 	./contrib/yq:FuzzYQCommands \
 	./contrib/jq:FuzzJQCommands
@@ -47,6 +48,7 @@ FUZZ_SMOKE_SHARD_SECURITY := \
 	FuzzGeneratedPrograms \
 	FuzzAttackMutations \
 	FuzzEchoCommand \
+	FuzzUnameCommand \
 	FuzzWhoCommand \
 	FuzzShellProcessCommands \
 	FuzzDircolorsCommand
@@ -88,6 +90,7 @@ FUZZ_FULL_SHARD_3 := \
 	FuzzDirectoryTraversalCommands \
 	FuzzCsplitCommand \
 	FuzzTextSearchCommands \
+	FuzzNumfmtCommand \
 	FuzzColumnCommand \
 	FuzzSedFlagsCommand \
 	FuzzXArgsFlagsCommand \
@@ -106,6 +109,7 @@ FUZZ_FULL_SHARD_4 := \
 	FuzzTimeoutCommand \
 	FuzzExprCommand \
 	FuzzEchoCommand \
+	FuzzUnameCommand \
 	FuzzWhoCommand \
 	FuzzDircolorsCommand \
 	FuzzShellProcessCommands \
@@ -143,7 +147,7 @@ fuzz-run:
 	@test -n "$(strip $(FUZZ_TARGETS))" || { echo "FUZZ_TARGETS is required"; exit 1; }
 	@set -e; \
 	for target in $(FUZZ_TARGETS); do \
-		pkg=./runtime; \
+		pkg=./internal/runtime; \
 		fuzz_target=$$target; \
 		case "$$target" in \
 			*:* ) \

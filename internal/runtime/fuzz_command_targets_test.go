@@ -373,6 +373,74 @@ func FuzzShellProcessCommands(f *testing.F) {
 	})
 }
 
+func FuzzUnameCommand(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		selector uint8
+		token    string
+	}{
+		{0, ""},
+		{1, ""},
+		{2, ""},
+		{3, ""},
+		{4, ""},
+		{5, "sysname"},
+		{6, "release"},
+		{7, "operating-system"},
+		{8, "ver"},
+		{9, "definitely-invalid"},
+		{10, "extra"},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.selector, seed.token)
+	}
+
+	f.Fuzz(func(t *testing.T, selector uint8, rawToken string) {
+		session := newFuzzSession(t, rt)
+		token := sanitizeFuzzPathComponent(rawToken)
+		if token == "" {
+			token = "value"
+		}
+
+		args := []string{"uname"}
+		switch selector % 11 {
+		case 0:
+		case 1:
+			args = append(args, "-a")
+		case 2:
+			args = append(args, "-snrvmo")
+		case 3:
+			args = append(args, "-p")
+		case 4:
+			args = append(args, "-i")
+		case 5:
+			args = append(args, "--"+token)
+		case 6:
+			args = append(args, "--operating-system")
+		case 7:
+			args = append(args, "--sysname")
+		case 8:
+			args = append(args, "--release")
+		case 9:
+			args = append(args, "--ver")
+		case 10:
+			args = append(args, token)
+		}
+
+		script := fmt.Appendf(nil, "%s >/tmp/uname.out 2>/tmp/uname.err || true\n", strings.Join(func() []string {
+			quoted := make([]string, 0, len(args))
+			for _, arg := range args {
+				quoted = append(quoted, shellQuote(arg))
+			}
+			return quoted
+		}(), " "))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSecureFuzzOutcome(t, script, result, err)
+	})
+}
+
 func FuzzWhoCommand(f *testing.F) {
 	rt := newFuzzRuntime(f)
 
@@ -554,6 +622,11 @@ func FuzzDataCommands(f *testing.F) {
 				"b2sum --length=128 /tmp/input.json >/tmp/b2-128-file.txt\n" +
 				"b2sum /tmp/input.json >/tmp/b2-checksums.txt\n" +
 				"b2sum -c /tmp/b2-checksums.txt >/tmp/b2-check.txt || true\n" +
+				"sum /tmp/input.json >/tmp/sum-bsd.txt\n" +
+				"sum -r /tmp/input.json >/tmp/sum-bsd-r.txt\n" +
+				"sum -s /tmp/input.json >/tmp/sum-sysv.txt\n" +
+				"cat /tmp/input.json | sum >/tmp/sum-stdin.txt\n" +
+				"cat /tmp/input.json | sum --sysv >/tmp/sum-sysv-stdin.txt\n" +
 				"cksum /tmp/input.json >/tmp/cksum-crc.txt\n" +
 				"cksum -a md5 /tmp/input.json >/tmp/cksum-md5.txt\n" +
 				"cksum -a sha2 -l 256 /tmp/input.json >/tmp/cksum-sha256.txt\n" +
