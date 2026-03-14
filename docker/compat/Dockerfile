@@ -45,7 +45,7 @@ RUN curl -fsSL "https://ftp.gnu.org/gnu/coreutils/coreutils-${GNU_COREUTILS_VERS
     mkdir -p /opt/gnu && \
     tar -xzf /tmp/coreutils.tar.gz -C /opt/gnu && \
     cd "/opt/gnu/coreutils-${GNU_COREUTILS_VERSION}" && \
-    ./configure --disable-nls --disable-dependency-tracking && \
+    FORCE_UNSAFE_CONFIGURE=1 ./configure --disable-nls --disable-dependency-tracking && \
     make -j"$(nproc)" && \
     rm /tmp/coreutils.tar.gz && \
     tar -czf /opt/gnu/prepared.tar.gz -C "/opt/gnu/coreutils-${GNU_COREUTILS_VERSION}" .
