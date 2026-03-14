@@ -127,6 +127,13 @@ The CLI also provides a minimal interactive shell mode. That mode is a front-end
 - it executes each completed entry via `Session.Exec`
 - it carries forward the virtual cwd and shell-visible variable state between entries at the CLI layer
 
+The normal CLI entrypoint also accepts filesystem selection flags before the shell arguments:
+
+- `gbash --root <dir> ...` mounts `<dir>` read-only at `/home/agent/project` with an in-memory writable overlay
+- `gbash --cwd <dir> ...` sets the initial sandbox working directory
+- `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
+- when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
+
 The CLI also exposes a developer-only compatibility path for external test harnesses:
 
 - `gbash compat exec <utility> [args...]` runs one registered utility directly instead of reading a shell script from stdin
@@ -185,7 +192,7 @@ Package responsibilities:
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends
 - `network/`: runtime-owned HTTP sandbox with URL-prefix allowlists, method controls, redirect revalidation, and response-size limits
 - `commands/`: registry and Go-native command implementations such as `echo`, `cat`, `ls`, and `pwd`
-- `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime. The repository may also expose umbrella contrib helpers such as `contrib/extras` to register the full official contrib command set without changing the default runtime surface.
+- `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime. The repository may also expose umbrella contrib helpers such as `contrib/extras` to register the stable official contrib command set without changing the default runtime surface. Current examples include `awk`, `jq`, `nodejs`, `sqlite3`, and `yq`.
 - `packages/`: publishable JavaScript and TypeScript packages. `packages/gbash-wasm` owns the browser-facing `js/wasm` bridge and its packaged WebAssembly assets.
 - `policy/`: allowlists, root restrictions, size limits, network stance, and decision helpers
 - `trace/`: event schema, recorder interfaces, and in-memory buffering
@@ -195,6 +202,8 @@ Package responsibilities:
 We intentionally do not create a `compat/` package because compatibility mode is not a product feature.
 
 The repository itself should be maintained as a committed Go workspace plus a pnpm workspace. The root module stays focused on the runtime, CLI, and core commands, while direct children under `contrib/` are separate modules for optional heavyweight commands, `packages/` contains publishable JavaScript packages, and `examples/` is a separate module used for demos that may need external SDK dependencies or looser version pinning.
+
+Optional language runtimes in `contrib/` must preserve the same sandbox contract as core commands. The current `contrib/nodejs` design is experimental and intentionally excluded from `contrib/extras` until its surface stabilizes. It uses `goja` plus a curated `goja_nodejs` allowlist, with gbash-owned replacements for host-sensitive modules such as `process`, `console`, `fs`, and `path`. It does not expose host subprocesses, host filesystem access, or unrestricted network APIs, and any supported file access must flow through `Invocation.FS`.
 
 ## 8. Core Interfaces
 
@@ -497,6 +506,7 @@ Important properties:
 - the default backend is in-memory
 - the default backend exposes a Unix-like virtual layout rooted at `/`
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
+- a read-write host-backed filesystem may be enabled explicitly for compatibility harnesses or advanced embedding, but it is not the default runtime backend
 - developer-only CLI compatibility runs may use a host-backed filesystem adapter, but that adapter is not the default runtime backend and is only for opt-in test harnesses
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
@@ -516,6 +526,7 @@ Current and planned backends:
 
 - `MemoryFS`: default mutable sandbox
 - `HostFS`: read-only host-backed directory view mounted at a configurable virtual root with sanitized errors and a backend-local regular-file read cap
+- `ReadWriteFS`: mutable host-backed directory view rooted at `/` with sanitized errors and a backend-local regular-file read cap for opt-in compatibility workflows
 - `OverlayFS`: copy-on-write backend with a read-only lower layer, writable in-memory upper layer, merged `readdir`, and tombstones for deletions
 - `SnapshotFS`: deterministic read-only clone of another filesystem for tests and replay fixtures
 
@@ -523,6 +534,7 @@ Backend boundary for the current implementation:
 
 - `gbash.Config.FileSystem` is the public setup boundary for session storage and starting directory; callers should not have to coordinate separate runtime knobs to mount a backend and choose the initial working directory
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
+- `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external compatibility harnesses, and embedders that explicitly want host mutations
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
 - `SnapshotFS` is not the default `runtime` session backend because session bootstrap still creates the sandbox layout and command stubs
