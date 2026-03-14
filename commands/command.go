@@ -24,7 +24,6 @@ type LookupCNAMEFunc func(context.Context, string) (string, error)
 type ProcessAliveFunc func(context.Context, int) (bool, error)
 
 type Invocation struct {
-	Context               context.Context
 	Args                  []string
 	Env                   map[string]string
 	Cwd                   string

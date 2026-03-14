@@ -21,7 +21,6 @@ type FetchResponse = network.Response
 type FetchFunc func(context.Context, *FetchRequest) (*FetchResponse, error)
 
 type InvocationOptions struct {
-	Context               context.Context
 	Args                  []string
 	Env                   map[string]string
 	Cwd                   string
@@ -57,7 +56,6 @@ func NewInvocation(opts *InvocationOptions) *Invocation {
 	}
 
 	inv := &Invocation{
-		Context:               opts.Context,
 		Args:                  append([]string(nil), opts.Args...),
 		Env:                   cloneEnv(opts.Env),
 		Cwd:                   gbfs.Resolve("/", opts.Cwd),
