@@ -44,9 +44,10 @@ Write the same report to JSON with:
 make bench-compare JSON_OUT=bench-compare.json
 ```
 
-The comparison report includes four cold-start runtimes:
+The comparison report includes five cold-start runtimes:
 
 - `gbash`: the native Go helper process
+- `GNU bash`: the host `bash` interpreter launched with profiles disabled
 - `gbash-extras`: the shipped extras CLI with `awk`, `jq`, `sqlite3`, and `yq` pre-registered
 - `gbash-node-wasm`: the `packages/gbash-wasm/wasm` artifact booted inside Node.js
 - `just-bash`: the published npm package invoked through `npx`
@@ -62,9 +63,10 @@ comparisons are still not fully apples to apples, because `just-bash` currently
 embeds tools like Python in its base container and `gbash` does not.
 
 When JSON output is enabled, each runtime result includes `artifact_size_bytes`.
-For the native runtimes this is the built executable size, for Node/WASM it is the
-`gbash.wasm` size, and for `just-bash` it is the installed `node_modules` closure
-size measured from a temporary `npm install` plus the host `node` executable size.
+For the native runtimes this is the built executable size, for `GNU bash` it is the
+host `bash` executable size, for Node/WASM it is the `gbash.wasm` size, and for
+`just-bash` it is the installed `node_modules` closure size measured from a
+temporary `npm install` plus the host `node` executable size.
 
 ## GNU Coreutils Compatibility Testing
 

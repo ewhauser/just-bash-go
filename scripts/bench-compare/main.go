@@ -142,6 +142,14 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		return fmt.Errorf("locate bash executable: %w", err)
+	}
+	bashSize, err := fileSize(bashPath)
+	if err != nil {
+		return err
+	}
 	extrasPath := filepath.Join(tmpDir, executableName("gbash-extras"))
 	if err := buildGbashExtrasCLI(ctx, repoRoot, extrasPath); err != nil {
 		return err
@@ -174,6 +182,7 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 	runtimes := []runtimeConfig{
 		gbashRuntime(helperPath, helperSize),
+		gnuBashRuntime(repoRoot, bashPath, bashSize),
 		gbashExtrasRuntime(extrasPath, extrasSize),
 		gbashNodeWasmRuntime(repoRoot, wasmAssetDir, wasmSize),
 		justBashRuntime(opts.JustBashSpec, justBashSize),
@@ -354,6 +363,22 @@ func gbashRuntime(helperPath string, artifactSizeBytes int64) runtimeConfig {
 			}
 			args = append(args, "-c", scenario.Command)
 			return exec.CommandContext(ctx, helperPath, args...)
+		},
+	}
+}
+
+func gnuBashRuntime(repoRoot, bashPath string, artifactSizeBytes int64) runtimeConfig {
+	return runtimeConfig{
+		Name:              "GNU bash",
+		ArtifactSizeBytes: artifactSizeBytes,
+		Command: func(ctx context.Context, scenario *scenarioConfig) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, bashPath, "--noprofile", "--norc", "-c", scenario.Command)
+			cmd.Dir = repoRoot
+			if scenario.Workspace && scenario.Fixture != nil {
+				cmd.Dir = scenario.Fixture.Root
+			}
+			cmd.Env = append(os.Environ(), "BASH_ENV=")
+			return cmd
 		},
 	}
 }

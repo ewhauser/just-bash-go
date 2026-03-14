@@ -164,6 +164,53 @@ func TestGbashNodeWasmRuntime(t *testing.T) {
 	}
 }
 
+func TestGNUBashRuntime(t *testing.T) {
+	repoRoot := filepath.Join(string(filepath.Separator), "repo")
+	bashPath := filepath.Join(string(filepath.Separator), "bin", "bash")
+	runtime := gnuBashRuntime(repoRoot, bashPath, 4321)
+
+	cmd := runtime.Command(context.Background(), &scenarioConfig{
+		Command: "echo benchmark\n",
+	})
+	if got, want := cmd.Path, bashPath; got != want {
+		t.Fatalf("cmd.Path = %q, want %q", got, want)
+	}
+	if got, want := cmd.Dir, repoRoot; got != want {
+		t.Fatalf("cmd.Dir = %q, want %q", got, want)
+	}
+	if got, want := runtime.ArtifactSizeBytes, int64(4321); got != want {
+		t.Fatalf("runtime.ArtifactSizeBytes = %d, want %d", got, want)
+	}
+	wantArgs := []string{
+		bashPath,
+		"--noprofile",
+		"--norc",
+		"-c",
+		"echo benchmark\n",
+	}
+	if !slices.Equal(cmd.Args, wantArgs) {
+		t.Fatalf("cmd.Args = %q, want %q", cmd.Args, wantArgs)
+	}
+}
+
+func TestGNUBashRuntimeWorkspace(t *testing.T) {
+	repoRoot := filepath.Join(string(filepath.Separator), "repo")
+	bashPath := filepath.Join(string(filepath.Separator), "bin", "bash")
+	runtime := gnuBashRuntime(repoRoot, bashPath, 4321)
+
+	fixtureRoot := filepath.Join(string(filepath.Separator), "tmp", "fixture")
+	cmd := runtime.Command(context.Background(), &scenarioConfig{
+		Command:   "find . -type f\n",
+		Workspace: true,
+		Fixture: &fixtureSummary{
+			Root: fixtureRoot,
+		},
+	})
+	if got, want := cmd.Dir, fixtureRoot; got != want {
+		t.Fatalf("cmd.Dir = %q, want %q", got, want)
+	}
+}
+
 func TestGbashExtrasRuntime(t *testing.T) {
 	helperPath := filepath.Join(string(filepath.Separator), "tmp", "gbash-extras")
 	runtime := gbashExtrasRuntime(helperPath, 5678)
