@@ -28,7 +28,10 @@ func withInteractiveHistory(runner *interp.Runner, script string) string {
 	return fmt.Sprintf("%s='%s'\n%s", shellHistoryEnvVar, shellSingleQuote(string(raw)), script)
 }
 
-func syncCommandHistory(ctx context.Context, hc interp.HandlerContext, before map[string]string, after map[string]string) error {
+func syncCommandHistory(ctx context.Context, hc *interp.HandlerContext, before, after map[string]string) error {
+	if hc == nil {
+		return nil
+	}
 	beforeValue, beforeOK := before[shellHistoryEnvVar]
 	afterValue, afterOK := after[shellHistoryEnvVar]
 	if beforeOK == afterOK && beforeValue == afterValue {

@@ -424,7 +424,7 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 			},
 		})
 		err = commands.RunCommand(ctx, resolved.command, invocation)
-		if syncErr := syncCommandHistory(ctx, hc, currentEnv, invocation.Env); syncErr != nil {
+		if syncErr := syncCommandHistory(ctx, &hc, currentEnv, invocation.Env); syncErr != nil {
 			return syncErr
 		}
 
