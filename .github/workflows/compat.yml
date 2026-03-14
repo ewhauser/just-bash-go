@@ -92,6 +92,12 @@ jobs:
           GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
         run: |
           set +e
+          shell_term=0
+          on_term() {
+            shell_term=1
+            echo "compat workflow shell received SIGTERM; waiting for harness shutdown"
+          }
+          trap on_term TERM
           mkdir -p "$GNU_RESULTS_DIR"
           if command -v setsid >/dev/null 2>&1; then
             setsid env GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
@@ -99,6 +105,10 @@ jobs:
             GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
           fi
           status=$?
+          trap - TERM
+          if [ "$shell_term" -ne 0 ] && [ "$status" -eq 0 ]; then
+            status=143
+          fi
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
