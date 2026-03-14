@@ -316,12 +316,31 @@ func buildGbashWasmAssets(ctx context.Context, repoRoot, assetDir string) error 
 		return fmt.Errorf("build gbash wasm benchmark assets: %w: %s", err, combineOutput(stdout.String(), stderr.String()))
 	}
 
-	wasmExecSrc := filepath.Join(goruntime.GOROOT(), "lib", "wasm", "wasm_exec.js")
+	goRoot, err := goEnv(buildCtx, "GOROOT")
+	if err != nil {
+		return err
+	}
+	wasmExecSrc := filepath.Join(goRoot, "lib", "wasm", "wasm_exec.js")
 	wasmExecDst := filepath.Join(assetDir, "wasm_exec.js")
 	if err := copyFile(wasmExecDst, wasmExecSrc); err != nil {
 		return fmt.Errorf("copy wasm_exec.js: %w", err)
 	}
 	return nil
+}
+
+func goEnv(ctx context.Context, key string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", key)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("resolve go env %s: %w: %s", key, err, combineOutput(stdout.String(), stderr.String()))
+	}
+	value := strings.TrimSpace(stdout.String())
+	if value == "" {
+		return "", fmt.Errorf("resolve go env %s: returned empty value", key)
+	}
+	return value, nil
 }
 
 func primeJustBash(ctx context.Context, spec string) error {
