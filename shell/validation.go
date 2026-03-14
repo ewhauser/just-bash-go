@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ewhauser/gbash/policy"
@@ -160,12 +161,7 @@ func hasSupportedFunctionName(fn *syntax.FuncDecl) bool {
 	if hasFunctionNameLiteral(fn.Name) {
 		return true
 	}
-	for _, name := range fn.Names {
-		if hasFunctionNameLiteral(name) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(fn.Names, hasFunctionNameLiteral)
 }
 
 func hasFunctionNameLiteral(name *syntax.Lit) bool {
