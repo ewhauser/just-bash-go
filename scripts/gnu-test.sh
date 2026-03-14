@@ -33,18 +33,20 @@ shell_quote() {
 
 prepare_workdir() {
   local workdir
-  if [[ "${GNU_KEEP_WORKDIR:-0}" == "1" ]]; then
-    workdir="$GNU_RESULTS_DIR/workdir"
-    rm -rf "$workdir"
-  else
-    mkdir -p "$GNU_CACHE_DIR/work"
-    workdir=$(mktemp -d "$GNU_CACHE_DIR/work/run-XXXXXX")
-  fi
+  workdir=$(mktemp -d "${TMPDIR:-/tmp}/gbash-gnu-work-XXXXXX")
 
   mkdir -p "$workdir"
   cp -a "$GNU_SOURCE_DIR"/. "$workdir"/
   relocate_workdir "$workdir"
   printf '%s\n' "$workdir"
+}
+
+preserve_workdir() {
+  local source_dir=$1
+  local preserved_dir=$GNU_RESULTS_DIR/workdir
+  rm -rf "$preserved_dir"
+  mv "$source_dir" "$preserved_dir"
+  printf '%s\n' "$preserved_dir"
 }
 
 relocate_workdir() {
@@ -112,7 +114,11 @@ write_wrapper() {
 #!/bin/sh
 set -eu
 
-script_dir=\$(CDPATH= cd -- "\$(dirname -- "\$0")" && pwd -P)
+script_path=\$0
+case "\$script_path" in
+  */*) script_dir=\$(CDPATH= cd -- "\${script_path%/*}" && pwd -P) ;;
+  *) script_dir=\$(pwd -P) ;;
+esac
 root_dir=\$(CDPATH= cd -- "\$script_dir/.." && pwd -P)
 host_pwd=\${PWD-}
 if [ -n "\$host_pwd" ]; then
@@ -143,12 +149,16 @@ write_relink_script() {
   local workdir=$1
   local hook_dir=$workdir/build-aux/gbash-harness
   mkdir -p "$hook_dir"
-  cat > "$hook_dir/relink.sh" <<'EOF'
+cat > "$hook_dir/relink.sh" <<'EOF'
 #!/bin/sh
 set -eu
 
 src_dir=$1
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+script_path=$0
+case "$script_path" in
+  */*) script_dir=$(CDPATH= cd -- "${script_path%/*}" && pwd -P) ;;
+  *) script_dir=$(pwd -P) ;;
+esac
 
 write_wrapper() {
   name=$1
@@ -160,7 +170,11 @@ write_wrapper() {
     printf '%s\n' '#!/bin/sh'
     printf '%s\n' 'set -eu'
     printf '\n'
-    printf '%s\n' 'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)'
+    printf '%s\n' 'script_path=$0'
+    printf '%s\n' 'case "$script_path" in'
+    printf '%s\n' '  */*) script_dir=$(CDPATH= cd -- "${script_path%/*}" && pwd -P) ;;'
+    printf '%s\n' '  *) script_dir=$(pwd -P) ;;'
+    printf '%s\n' 'esac'
     printf '%s\n' 'root_dir=$(CDPATH= cd -- "$script_dir/.." && pwd -P)'
     printf '%s\n' 'host_pwd=${PWD-}'
     printf '%s\n' 'if [ -n "$host_pwd" ]; then'
@@ -405,6 +419,10 @@ if ((${#selected_tests[@]} > 0)); then
   fi
 else
   : > "$log_path"
+fi
+
+if [[ "${GNU_KEEP_WORKDIR:-0}" == "1" ]]; then
+  workdir=$(preserve_workdir "$workdir")
 fi
 
 summary_status=0
