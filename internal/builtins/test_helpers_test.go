@@ -11,9 +11,7 @@ import (
 	"testing"
 
 	gbruntime "github.com/ewhauser/gbash"
-	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
-	"github.com/ewhauser/gbash/policy"
 )
 
 type Config = gbruntime.Config
@@ -86,30 +84,6 @@ func newSession(tb testing.TB, cfg *Config) *Session {
 		tb.Fatalf("Runtime.NewSession() error = %v", err)
 	}
 	return session
-}
-
-func newRuntimeWithLimits(tb testing.TB, limits policy.Limits) *Runtime {
-	tb.Helper()
-
-	return newRuntime(tb, &Config{
-		Policy: policy.NewStatic(&policy.Config{
-			ReadRoots:  []string{"/"},
-			WriteRoots: []string{"/"},
-			Limits:     limits,
-		}),
-	})
-}
-
-func registryWithCommands(tb testing.TB, extras ...commands.Command) *commands.Registry {
-	tb.Helper()
-
-	registry := gbruntime.DefaultRegistry()
-	for _, cmd := range extras {
-		if err := registry.Register(cmd); err != nil {
-			tb.Fatalf("Register(%s) error = %v", cmd.Name(), err)
-		}
-	}
-	return registry
 }
 
 func containsLine(lines []string, want string) bool {

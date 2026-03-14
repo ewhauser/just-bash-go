@@ -310,20 +310,6 @@ func buildTarGzipFixture(t *testing.T, entries ...tarFixtureEntry) []byte {
 	return buf.Bytes()
 }
 
-func buildGzipFixture(t *testing.T, data []byte) []byte {
-	t.Helper()
-
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	if _, err := zw.Write(data); err != nil {
-		t.Fatalf("gzip.Write() error = %v", err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("gzip.Close() error = %v", err)
-	}
-	return buf.Bytes()
-}
-
 func TestTarRejectsTraversalFromGzipArchiveToo(t *testing.T) {
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/evil.tar.gz", buildTarGzipFixture(t, tarFixtureEntry{
