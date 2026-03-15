@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 )
@@ -127,6 +128,42 @@ func TestBenchmarkBackendsCloneIsolation(t *testing.T) {
 			}
 			if _, err := base.Stat(context.Background(), "/new.txt"); !errors.Is(err, stdfs.ErrNotExist) {
 				t.Fatalf("base Stat(/new.txt) error = %v, want not exist", err)
+			}
+		})
+	}
+}
+
+func TestBenchmarkBackendsChownPreservesModTime(t *testing.T) {
+	t.Parallel()
+
+	wantModTime := time.Unix(1_700_000_000, 123_456_789).UTC()
+
+	for _, backend := range benchmarkBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fsys := backend.seeded(t, gbfs.InitialFiles{
+				"/data.txt": {Content: []byte("data\n")},
+			})
+			if err := fsys.Chtimes(context.Background(), "/data.txt", wantModTime, wantModTime); err != nil {
+				t.Fatalf("Chtimes() error = %v", err)
+			}
+
+			before, err := fsys.Stat(context.Background(), "/data.txt")
+			if err != nil {
+				t.Fatalf("Stat(before) error = %v", err)
+			}
+			if err := fsys.Chown(context.Background(), "/data.txt", 1234, 5678, true); err != nil {
+				t.Fatalf("Chown() error = %v", err)
+			}
+			after, err := fsys.Stat(context.Background(), "/data.txt")
+			if err != nil {
+				t.Fatalf("Stat(after) error = %v", err)
+			}
+
+			if got := before.ModTime(); !got.Equal(wantModTime) {
+				t.Fatalf("before ModTime() = %v, want %v", got, wantModTime)
+			}
+			if got := after.ModTime(); !got.Equal(wantModTime) {
+				t.Fatalf("after ModTime() = %v, want %v", got, wantModTime)
 			}
 		})
 	}

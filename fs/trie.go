@@ -506,9 +506,6 @@ func (f *TrieFS) Chown(_ context.Context, name string, uid, gid uint32, follow b
 	}
 	entry.inode.uid = uid
 	entry.inode.gid = gid
-	if entry.inode.mode&stdfs.ModeSymlink == 0 || follow {
-		entry.inode.modTime = time.Now().UTC()
-	}
 	_ = abs
 	return nil
 }
