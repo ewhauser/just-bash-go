@@ -84,3 +84,15 @@ func TestLetRegressionSupportsQuotedExpandedAndRuntimeExpandedArithmeticExpressi
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestLetRegressionSupportsExpandedAssignmentTargetExpression(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "a=b; b=3; let $a+=1; echo $b;\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "4\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
