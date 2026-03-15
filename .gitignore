@@ -19,7 +19,10 @@ bin/
 dist/
 .cache
 .gocache
+.tmp/
 node_modules/
+website/out/
+*.wasm
 
 # Editor and OS files
 .DS_Store

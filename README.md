@@ -70,6 +70,7 @@ go install github.com/ewhauser/gbash/contrib/extras/cmd/gbash-extras@latest
 
 Prebuilt `gbash` and `gbash-extras` archives are also available on the [GitHub Releases page](https://github.com/ewhauser/gbash/releases).
 Released Go modules are also requested from the public Go proxy during the release workflow so their API docs stay current on [pkg.go.dev](https://pkg.go.dev/github.com/ewhauser/gbash).
+The coordinated release workflow also exports the website and deploys it to [GitHub Pages](https://ewhauser.github.io/gbash/), preserving the latest published compatibility report under `/compat/latest/`.
 
 ## Quick Start
 

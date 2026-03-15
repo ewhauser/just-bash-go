@@ -2,6 +2,7 @@ import Link from "next/link";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
 import HeroTerminalWrapper from "./components/HeroTerminalWrapper";
+import { withBasePath } from "./lib/site";
 
 export default function Home() {
   return (
@@ -14,7 +15,11 @@ export default function Home() {
           {/* Left: project info */}
           <div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="gbash" className="h-28 w-28 sm:h-36 sm:w-36 mb-5" />
+            <img
+              src={withBasePath("/logo.svg")}
+              alt="gbash"
+              className="h-28 w-28 sm:h-36 sm:w-36 mb-5"
+            />
             <p className="text-base text-fg-secondary leading-relaxed mb-6">
               A deterministic, sandbox-only, bash-like runtime for AI agents,
               implemented in Go. Virtual filesystem, registry-backed command

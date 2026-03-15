@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Bash, defineCommand } from "@/app/lib/gbash-browser";
+import { withBasePath } from "@/app/lib/site";
 import { LiteTerminal } from "./lite-terminal";
 
 const ASCII_LOGO = [
@@ -247,8 +248,8 @@ export default function HeroTerminal() {
           "Yes! This is a real gbash shell running in your browser via WebAssembly.\n\nThe Go runtime is compiled to WASM using the @ewhauser/gbash-wasm package.\nEvery command you run here executes inside a sandboxed, in-memory\nfilesystem — nothing touches your host machine.\n\nTry it: create files, pipe commands, use grep/sed/awk — it all works.\n\n  cat README.md | head -3\n  echo hello > /tmp/test.txt && cat /tmp/test.txt\n  ls -la\n",
       },
       cwd: "/home/user",
-      wasmUrl: "/gbash.wasm",
-      wasmExecUrl: "/wasm_exec.js",
+      wasmUrl: withBasePath("/gbash.wasm"),
+      wasmExecUrl: withBasePath("/wasm_exec.js"),
     });
 
     let disposed = false;
