@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -143,16 +142,13 @@ func TestCLIServerServesStableExtrasRegistry(t *testing.T) {
 
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
-	send := func(id, method, sessionID, streamID string, payload any) {
+	send := func(id, method string, params any) {
 		t.Helper()
 		if err := enc.Encode(map[string]any{
-			"version":    "1",
-			"type":       "request",
-			"id":         id,
-			"method":     method,
-			"session_id": sessionID,
-			"stream_id":  streamID,
-			"payload":    payload,
+			"jsonrpc": "2.0",
+			"id":      id,
+			"method":  method,
+			"params":  params,
 		}); err != nil {
 			t.Fatalf("Encode(%s) error = %v", method, err)
 		}
@@ -167,84 +163,62 @@ func TestCLIServerServesStableExtrasRegistry(t *testing.T) {
 			if err := dec.Decode(&msg); err != nil {
 				t.Fatalf("Decode() error = %v", err)
 			}
-			if got, _ := msg["type"].(string); got == "response" && msg["id"] == id {
+			if msg["id"] == id {
 				return msg
 			}
 		}
 	}
 
-	send("1", "session.create", "", "", nil)
+	send("1", "session.create", nil)
 	createResp := readUntilResponse("1")
-	if ok, _ := createResp["ok"].(bool); !ok {
+	if _, hasError := createResp["error"]; hasError {
 		t.Fatalf("session.create response = %#v, want ok", createResp)
 	}
-	sessionID, ok := createResp["session_id"].(string)
+	result, ok := createResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("session.create response = %#v, want result object", createResp)
+	}
+	session, ok := result["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("session.create response = %#v, want session object", createResp)
+	}
+	sessionID, ok := session["session_id"].(string)
 	if !ok || sessionID == "" {
 		t.Fatalf("session.create response = %#v, want session_id", createResp)
 	}
 
-	send("2", "exec.start", sessionID, "", map[string]any{
-		"script": "printf 'a,b\\n' | awk -F, '{print $2}'\n",
+	send("2", "session.exec", map[string]any{
+		"session_id": sessionID,
+		"script":     "printf 'a,b\\n' | awk -F, '{print $2}'\n",
 	})
 	execResp := readUntilResponse("2")
-	if ok, _ := execResp["ok"].(bool); !ok {
-		t.Fatalf("exec.start response = %#v, want ok", execResp)
+	if _, hasError := execResp["error"]; hasError {
+		t.Fatalf("session.exec response = %#v, want ok", execResp)
 	}
-	streamID, ok := execResp["stream_id"].(string)
-	if !ok || streamID == "" {
-		t.Fatalf("exec.start response = %#v, want stream_id", execResp)
+	result, ok = execResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("session.exec response = %#v, want result object", execResp)
+	}
+	if got, want := result["stdout"], "b\n"; got != want {
+		t.Fatalf("stdout = %v, want %q", got, want)
+	}
+	if got, want := result["exit_code"], float64(0); got != want {
+		t.Fatalf("exit_code = %v, want %v", got, want)
 	}
 
-	var gotStdout strings.Builder
-	for {
-		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("SetReadDeadline() error = %v", err)
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("server exited with error: %v", err)
 		}
-		var msg struct {
-			Type     string `json:"type"`
-			Event    string `json:"event"`
-			StreamID string `json:"stream_id"`
-			Channel  string `json:"channel"`
-			Payload  struct {
-				Data string `json:"data"`
-			} `json:"payload"`
-		}
-		if err := dec.Decode(&msg); err != nil {
-			t.Fatalf("Decode(stream event) error = %v", err)
-		}
-		if msg.Type != "event" || msg.StreamID != streamID {
-			continue
-		}
-		switch msg.Event {
-		case "stream.data":
-			if msg.Channel != "stdout" {
-				continue
-			}
-			data, err := base64.StdEncoding.DecodeString(msg.Payload.Data)
-			if err != nil {
-				t.Fatalf("DecodeString(stdout) error = %v", err)
-			}
-			gotStdout.Write(data)
-		case "stream.exit":
-			if got, want := gotStdout.String(), "b\n"; got != want {
-				t.Fatalf("stdout = %q, want %q", got, want)
-			}
-			cancel()
-			select {
-			case err := <-errCh:
-				if err != nil {
-					t.Fatalf("server exited with error: %v", err)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("timed out waiting for gbash-extras server shutdown")
-			}
-			if got := stdout.String(); got != "" {
-				t.Fatalf("server stdout = %q, want empty", got)
-			}
-			if got := stderr.String(); got != "" {
-				t.Fatalf("server stderr = %q, want empty", got)
-			}
-			return
-		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for gbash-extras server shutdown")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("server stdout = %q, want empty", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("server stderr = %q, want empty", got)
 	}
 }

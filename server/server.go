@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,23 +19,30 @@ import (
 )
 
 const (
-	protocolVersion = "1"
-	defaultTTL      = 30 * time.Minute
-	defaultReplay   = 1 << 20
-	minReaperTick   = 100 * time.Millisecond
-	maxReaperTick   = time.Second
+	jsonRPCVersion = "2.0"
+	defaultTTL     = 30 * time.Minute
+	minReaperTick  = 100 * time.Millisecond
+	maxReaperTick  = time.Second
+
+	rpcParseError     = -32700
+	rpcInvalidRequest = -32600
+	rpcMethodNotFound = -32601
+	rpcInvalidParams  = -32602
+	rpcInternalError  = -32603
+
+	rpcSessionNotFound = -32010
+	rpcSessionBusy     = -32011
 )
 
 // Config configures the shared gbash server mode.
 type Config struct {
-	Runtime     *gbash.Runtime
-	Name        string
-	Version     string
-	SessionTTL  time.Duration
-	ReplayBytes int
+	Runtime    *gbash.Runtime
+	Name       string
+	Version    string
+	SessionTTL time.Duration
 }
 
-// ListenAndServeUnix serves the gbash protocol on a Unix domain socket.
+// ListenAndServeUnix serves the gbash JSON-RPC protocol on a Unix domain socket.
 func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) error {
 	socketPath = strings.TrimSpace(socketPath)
 	if socketPath == "" {
@@ -58,7 +67,7 @@ func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) erro
 	return Serve(ctx, ln, cfg)
 }
 
-// Serve serves the gbash protocol on an existing listener.
+// Serve serves the gbash JSON-RPC protocol on an existing listener.
 func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	if ln == nil {
 		return fmt.Errorf("server: listener is nil")
@@ -119,111 +128,44 @@ type clientConn struct {
 	enc    *json.Encoder
 	dec    *json.Decoder
 
-	send   chan *protocolMessage
-	closed chan struct{}
-	once   sync.Once
+	writeMu sync.Mutex
+	closed  chan struct{}
+	once    sync.Once
 }
 
-type protocolMessage struct {
-	Version   string          `json:"version,omitempty"`
-	Type      string          `json:"type"`
-	ID        string          `json:"id,omitempty"`
-	Method    string          `json:"method,omitempty"`
-	Event     string          `json:"event,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	StreamID  string          `json:"stream_id,omitempty"`
-	Channel   string          `json:"channel,omitempty"`
-	Seq       uint64          `json:"seq,omitempty"`
-	OK        *bool           `json:"ok,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	Error     *protocolError  `json:"error,omitempty"`
+type rpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-type protocolError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+type rpcResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  any             `json:"result,omitempty"`
+	Error   *rpcErrorObject `json:"error,omitempty"`
 }
 
-type helloResponse struct {
-	ServerName    string            `json:"server_name"`
-	ServerVersion string            `json:"server_version"`
-	Capabilities  helloCapabilities `json:"capabilities"`
+type rpcErrorObject struct {
+	Code    int           `json:"code"`
+	Message string        `json:"message"`
+	Data    *rpcErrorData `json:"data,omitempty"`
 }
 
-type helloCapabilities struct {
-	Binary           string `json:"binary"`
-	Transport        string `json:"transport"`
-	Reconnect        bool   `json:"reconnect"`
-	FileSystemRPC    bool   `json:"filesystem_rpc"`
-	PTY              bool   `json:"pty"`
-	InteractiveShell bool   `json:"interactive_shell"`
+type rpcErrorData struct {
+	Code    string `json:"code,omitempty"`
+	Details string `json:"details,omitempty"`
 }
 
-type sessionListResponse struct {
-	Sessions []sessionSummary `json:"sessions"`
-}
-
-type sessionDetailResponse struct {
-	Session sessionSummary  `json:"session"`
-	Streams []streamSummary `json:"streams,omitempty"`
-}
-
-type streamStartResponse struct {
-	SessionID      string `json:"session_id"`
-	StreamID       string `json:"stream_id"`
-	Kind           string `json:"kind"`
-	State          string `json:"state"`
-	WriterAttached bool   `json:"writer_attached"`
-}
-
-type streamAttachResponse struct {
-	SessionID      string `json:"session_id"`
-	StreamID       string `json:"stream_id"`
-	State          string `json:"state"`
-	WriterAttached bool   `json:"writer_attached"`
-}
-
-type sessionCreateRequest struct{}
-
-type execStartRequest struct {
-	Name           string            `json:"name"`
-	Script         string            `json:"script"`
-	Args           []string          `json:"args"`
-	StartupOptions []string          `json:"startup_options"`
-	Env            map[string]string `json:"env"`
-	WorkDir        string            `json:"work_dir"`
-	ReplaceEnv     bool              `json:"replace_env"`
-	TimeoutMs      int64             `json:"timeout_ms"`
-	Stdin          string            `json:"stdin"`
-}
-
-type shellStartRequest struct {
-	Name           string            `json:"name"`
-	Args           []string          `json:"args"`
-	StartupOptions []string          `json:"startup_options"`
-	Env            map[string]string `json:"env"`
-	WorkDir        string            `json:"work_dir"`
-	ReplaceEnv     bool              `json:"replace_env"`
-}
-
-type streamAttachRequest struct {
-	StreamID  string `json:"stream_id"`
-	StdoutSeq uint64 `json:"stdout_seq"`
-	StderrSeq uint64 `json:"stderr_seq"`
-	Write     bool   `json:"write"`
-}
-
-type streamDataRequest struct {
-	Data     string `json:"data"`
-	Encoding string `json:"encoding"`
+type helloParams struct {
+	ClientName    string `json:"client_name"`
+	ClientVersion string `json:"client_version"`
 }
 
 func normalizeConfig(cfg Config) Config {
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = defaultTTL
-	}
-	if cfg.ReplayBytes <= 0 {
-		cfg.ReplayBytes = defaultReplay
 	}
 	cfg.Name = strings.TrimSpace(cfg.Name)
 	if cfg.Name == "" {
@@ -263,6 +205,7 @@ func (s *serverState) reapLoop(done <-chan struct{}) {
 	case tick > maxReaperTick:
 		tick = maxReaperTick
 	}
+
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
@@ -284,7 +227,6 @@ func (s *serverState) addConn(nc net.Conn) {
 		conn:   nc,
 		enc:    json.NewEncoder(nc),
 		dec:    json.NewDecoder(nc),
-		send:   make(chan *protocolMessage, 128),
 		closed: make(chan struct{}),
 	}
 
@@ -292,7 +234,6 @@ func (s *serverState) addConn(nc net.Conn) {
 	s.conns[conn.id] = conn
 	s.connsMu.Unlock()
 
-	go conn.writeLoop()
 	go conn.readLoop()
 }
 
@@ -309,20 +250,9 @@ func (s *serverState) closeConnections() {
 		conns = append(conns, conn)
 	}
 	s.connsMu.RUnlock()
+
 	for _, conn := range conns {
 		conn.close()
-	}
-}
-
-func (s *serverState) sendToAll(msg *protocolMessage) {
-	s.connsMu.RLock()
-	conns := make([]*clientConn, 0, len(s.conns))
-	for _, conn := range s.conns {
-		conns = append(conns, conn)
-	}
-	s.connsMu.RUnlock()
-	for _, conn := range conns {
-		conn.sendMessage(msg)
 	}
 }
 
@@ -330,89 +260,183 @@ func (s *serverState) nextIDValue(prefix string) string {
 	return fmt.Sprintf("%s-%06d", prefix, s.nextID.Add(1))
 }
 
-func (c *clientConn) writeLoop() {
-	for {
-		select {
-		case <-c.closed:
-			return
-		case msg := <-c.send:
-			if err := c.enc.Encode(msg); err != nil {
-				c.close()
-				return
-			}
-		}
-	}
-}
-
 func (c *clientConn) readLoop() {
 	defer c.close()
+
 	for {
-		var msg protocolMessage
-		if err := c.dec.Decode(&msg); err != nil {
+		var raw json.RawMessage
+		if err := c.dec.Decode(&raw); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			_ = c.writeResponse(newRPCErrorResponse(nil, rpcParseError, "parse error", nil))
 			return
 		}
-		if err := c.handleMessage(&msg); err != nil {
-			c.respondError(msg.ID, msg.SessionID, msg.StreamID, "INVALID_REQUEST", err.Error())
+
+		req, errResp := parseRPCRequest(raw)
+		if errResp != nil {
+			if err := c.writeResponse(errResp); err != nil {
+				return
+			}
+			continue
+		}
+
+		resp := c.handleRequest(req)
+		if resp == nil {
+			continue
+		}
+		if err := c.writeResponse(resp); err != nil {
+			return
 		}
 	}
 }
 
-func (c *clientConn) handleMessage(msg *protocolMessage) error {
-	if msg == nil {
-		return fmt.Errorf("request is nil")
+func parseRPCRequest(raw json.RawMessage) (*rpcRequest, *rpcResponse) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", nil)
 	}
-	if strings.TrimSpace(msg.Version) != "" && strings.TrimSpace(msg.Version) != protocolVersion {
-		return fmt.Errorf("unsupported protocol version %q", msg.Version)
-	}
-	if strings.TrimSpace(msg.Type) != "request" {
-		return fmt.Errorf("message type must be request")
-	}
-	if strings.TrimSpace(msg.ID) == "" {
-		return fmt.Errorf("request id must not be empty")
+	if trimmed[0] == '[' {
+		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "batch requests are not supported", nil)
 	}
 
-	switch msg.Method {
-	case "hello":
-		c.respondOK(msg.ID, "", "", helloResponse{
-			ServerName:    c.server.cfg.Name,
-			ServerVersion: c.server.cfg.Version,
-			Capabilities: helloCapabilities{
-				Binary:           c.server.cfg.Name,
-				Transport:        "unix",
-				Reconnect:        true,
-				FileSystemRPC:    false,
-				PTY:              false,
-				InteractiveShell: true,
-			},
+	var req rpcRequest
+	if err := json.Unmarshal(trimmed, &req); err != nil {
+		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
+			Code:    "INVALID_REQUEST",
+			Details: err.Error(),
 		})
-	case "ping":
-		c.respondOK(msg.ID, "", "", map[string]any{"pong": true})
-	case "session.create":
-		return c.handleSessionCreate(msg)
-	case "session.get":
-		return c.handleSessionGet(msg)
-	case "session.list":
-		return c.handleSessionList(msg)
-	case "session.destroy":
-		return c.handleSessionDestroy(msg)
-	case "exec.start":
-		return c.handleExecStart(msg)
-	case "shell.start":
-		return c.handleShellStart(msg)
-	case "stream.attach":
-		return c.handleStreamAttach(msg)
-	case "stream.detach":
-		return c.handleStreamDetach(msg)
-	case "stream.write":
-		return c.handleStreamWrite(msg)
-	case "stream.close":
-		return c.handleStreamClose(msg)
-	case "stream.cancel":
-		return c.handleStreamCancel(msg)
+	}
+	if req.JSONRPC != jsonRPCVersion {
+		return nil, newRPCErrorResponse(validResponseID(req.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
+			Code:    "INVALID_REQUEST",
+			Details: "jsonrpc must be \"2.0\"",
+		})
+	}
+	if len(req.ID) == 0 || !validRequestID(req.ID) {
+		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
+			Code:    "INVALID_REQUEST",
+			Details: "id must be a string, number, or null",
+		})
+	}
+	if strings.TrimSpace(req.Method) == "" {
+		return nil, newRPCErrorResponse(validResponseID(req.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
+			Code:    "INVALID_REQUEST",
+			Details: "method must not be empty",
+		})
+	}
+	return &req, nil
+}
+
+func validRequestID(id json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(id)
+	if len(trimmed) == 0 {
+		return false
+	}
+	switch trimmed[0] {
+	case '"', 'n', '-':
+		return true
 	default:
-		c.respondError(msg.ID, msg.SessionID, msg.StreamID, "METHOD_NOT_FOUND", fmt.Sprintf("unknown method %q", msg.Method))
+		return trimmed[0] >= '0' && trimmed[0] <= '9'
+	}
+}
+
+func validResponseID(id json.RawMessage) json.RawMessage {
+	if validRequestID(id) {
+		return id
 	}
 	return nil
+}
+
+func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
+	if req == nil {
+		return newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", nil)
+	}
+
+	switch req.Method {
+	case "system.hello", "hello":
+		if _, err := decodeParams[helloParams](req.Params); err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, helloResult{
+			ServerName:    c.server.cfg.Name,
+			ServerVersion: c.server.cfg.Version,
+			Protocol:      jsonRPCVersion,
+			Capabilities: helloCapabilities{
+				Binary:             c.server.cfg.Name,
+				Transport:          "unix",
+				PersistentSessions: true,
+				SessionExec:        true,
+				FileSystemRPC:      false,
+				InteractiveShell:   false,
+			},
+		})
+	case "system.ping", "ping":
+		if _, err := decodeParams[map[string]any](req.Params); err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, map[string]any{"pong": true})
+	case "session.create":
+		if _, err := decodeParams[map[string]any](req.Params); err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		session, err := c.server.createSession()
+		if err != nil {
+			return internalErrorResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, sessionCreateResult{Session: session.summary()})
+	case "session.get":
+		params, err := decodeParams[sessionIDParams](req.Params)
+		if err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		session, err := c.server.lookupSession(params.SessionID)
+		if err != nil {
+			return appErrorResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, sessionGetResult{Session: session.summary()})
+	case "session.list":
+		if _, err := decodeParams[map[string]any](req.Params); err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		c.server.reapExpiredSessions(time.Now().UTC())
+		return newRPCResultResponse(req.ID, sessionListResult{Sessions: c.server.listSessions()})
+	case "session.destroy":
+		params, err := decodeParams[sessionIDParams](req.Params)
+		if err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		session, err := c.server.destroySession(params.SessionID)
+		if err != nil {
+			return appErrorResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, sessionGetResult{Session: session.summary()})
+	case "session.exec":
+		params, err := decodeParams[sessionExecParams](req.Params)
+		if err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		session, err := c.server.lookupSession(params.SessionID)
+		if err != nil {
+			return appErrorResponse(req.ID, err)
+		}
+		result, err := session.exec(c.server.ctx, &params)
+		if err != nil {
+			return appErrorResponse(req.ID, err)
+		}
+		return newRPCResultResponse(req.ID, result)
+	default:
+		return newRPCErrorResponse(req.ID, rpcMethodNotFound, "method not found", nil)
+	}
+}
+
+func (c *clientConn) writeResponse(resp *rpcResponse) error {
+	if resp == nil {
+		return nil
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.enc.Encode(resp)
 }
 
 func (c *clientConn) close() {
@@ -420,266 +444,81 @@ func (c *clientConn) close() {
 		close(c.closed)
 		_ = c.conn.Close()
 		c.server.removeConn(c.id)
-		c.server.detachConnection(c.id)
 	})
 }
 
-func (c *clientConn) sendMessage(msg *protocolMessage) bool {
-	if msg == nil {
-		return false
-	}
-	select {
-	case <-c.closed:
-		return false
-	case c.send <- msg:
-		return true
+func newRPCResultResponse(id json.RawMessage, result any) *rpcResponse {
+	return &rpcResponse{
+		JSONRPC: jsonRPCVersion,
+		ID:      responseID(id),
+		Result:  result,
 	}
 }
 
-func (c *clientConn) respondOK(id, sessionID, streamID string, payload any) {
-	ok := true
-	c.sendMessage(newProtocolMessage("response", id, sessionID, streamID, "", "", 0, &ok, payload, nil))
-}
-
-func (c *clientConn) respondError(id, sessionID, streamID, code, message string) {
-	ok := false
-	c.sendMessage(newProtocolMessage("response", id, sessionID, streamID, "", "", 0, &ok, nil, &protocolError{
-		Code:    code,
-		Message: message,
-	}))
-}
-
-func newProtocolMessage(msgType, id, sessionID, streamID, event, channel string, seq uint64, ok *bool, payload any, err *protocolError) *protocolMessage {
-	msg := &protocolMessage{
-		Version:   protocolVersion,
-		Type:      msgType,
-		ID:        id,
-		Event:     event,
-		SessionID: sessionID,
-		StreamID:  streamID,
-		Channel:   channel,
-		Seq:       seq,
-		OK:        ok,
-		Error:     err,
+func newRPCErrorResponse(id json.RawMessage, code int, message string, data *rpcErrorData) *rpcResponse {
+	return &rpcResponse{
+		JSONRPC: jsonRPCVersion,
+		ID:      responseID(id),
+		Error: &rpcErrorObject{
+			Code:    code,
+			Message: message,
+			Data:    data,
+		},
 	}
-	if payload != nil {
-		data, marshalErr := json.Marshal(payload)
-		if marshalErr == nil && string(data) != "null" {
-			msg.Payload = data
-		}
-	}
-	return msg
 }
 
-func decodePayload[T any](raw json.RawMessage) (T, error) {
+func responseID(id json.RawMessage) json.RawMessage {
+	if validRequestID(id) {
+		return id
+	}
+	return json.RawMessage("null")
+}
+
+func invalidParamsResponse(id json.RawMessage, err error) *rpcResponse {
+	return newRPCErrorResponse(id, rpcInvalidParams, "invalid params", &rpcErrorData{
+		Code:    "INVALID_ARGUMENT",
+		Details: err.Error(),
+	})
+}
+
+func internalErrorResponse(id json.RawMessage, err error) *rpcResponse {
+	details := ""
+	if err != nil {
+		details = err.Error()
+	}
+	return newRPCErrorResponse(id, rpcInternalError, "internal error", &rpcErrorData{
+		Code:    "INTERNAL",
+		Details: details,
+	})
+}
+
+func appErrorResponse(id json.RawMessage, err error) *rpcResponse {
+	switch {
+	case errors.Is(err, errInvalidArgument):
+		return invalidParamsResponse(id, err)
+	case errors.Is(err, errSessionNotFound):
+		return newRPCErrorResponse(id, rpcSessionNotFound, "session not found", &rpcErrorData{
+			Code:    "SESSION_NOT_FOUND",
+			Details: err.Error(),
+		})
+	case errors.Is(err, errSessionBusy):
+		return newRPCErrorResponse(id, rpcSessionBusy, "session is busy", &rpcErrorData{
+			Code:    "SESSION_BUSY",
+			Details: err.Error(),
+		})
+	default:
+		return internalErrorResponse(id, err)
+	}
+}
+
+func decodeParams[T any](raw json.RawMessage) (T, error) {
 	var out T
-	if len(raw) == 0 {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return out, nil
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return out, err
+	if err := json.Unmarshal(trimmed, &out); err != nil {
+		return out, fmt.Errorf("%w: %v", errInvalidArgument, err)
 	}
 	return out, nil
-}
-
-func (c *clientConn) handleSessionCreate(msg *protocolMessage) error {
-	if _, err := decodePayload[sessionCreateRequest](msg.Payload); err != nil {
-		return fmt.Errorf("decode session.create payload: %w", err)
-	}
-	session, err := c.server.createSession()
-	if err != nil {
-		c.respondError(msg.ID, "", "", "INTERNAL", err.Error())
-		return nil
-	}
-	summary := session.summary()
-	c.respondOK(msg.ID, session.id, "", sessionDetailResponse{Session: summary})
-	c.server.sendToAll(session.eventMessage("session.created", summary))
-	return nil
-}
-
-func (c *clientConn) handleSessionGet(msg *protocolMessage) error {
-	session, err := c.server.lookupSession(msg.SessionID)
-	if err != nil {
-		c.respondError(msg.ID, msg.SessionID, "", "SESSION_NOT_FOUND", err.Error())
-		return nil
-	}
-	summary, streams := session.detail()
-	c.respondOK(msg.ID, session.id, "", sessionDetailResponse{Session: summary, Streams: streams})
-	return nil
-}
-
-func (c *clientConn) handleSessionList(msg *protocolMessage) error {
-	c.server.reapExpiredSessions(time.Now().UTC())
-	c.respondOK(msg.ID, "", "", sessionListResponse{Sessions: c.server.listSessions()})
-	return nil
-}
-
-func (c *clientConn) handleSessionDestroy(msg *protocolMessage) error {
-	if strings.TrimSpace(msg.SessionID) == "" {
-		return fmt.Errorf("session_id must not be empty")
-	}
-	session, err := c.server.destroySession(msg.SessionID)
-	if err != nil {
-		code := "INTERNAL"
-		switch {
-		case errors.Is(err, errSessionBusy):
-			code = "SESSION_BUSY"
-		case errors.Is(err, errSessionNotFound):
-			code = "SESSION_NOT_FOUND"
-		}
-		c.respondError(msg.ID, msg.SessionID, "", code, err.Error())
-		return nil
-	}
-	summary := session.summary()
-	c.respondOK(msg.ID, session.id, "", sessionDetailResponse{Session: summary})
-	c.server.sendToAll(newProtocolMessage("event", "", session.id, "", "session.updated", "", 0, nil, summary, nil))
-	return nil
-}
-
-func (c *clientConn) handleExecStart(msg *protocolMessage) error {
-	req, err := decodePayload[execStartRequest](msg.Payload)
-	if err != nil {
-		return fmt.Errorf("decode exec.start payload: %w", err)
-	}
-	session, err := c.server.lookupSession(msg.SessionID)
-	if err != nil {
-		c.respondError(msg.ID, msg.SessionID, "", "SESSION_NOT_FOUND", err.Error())
-		return nil
-	}
-	stream, startErr := session.startExec(c, &req)
-	if startErr != nil {
-		c.respondError(msg.ID, msg.SessionID, "", protocolErrorCode(startErr), startErr.Error())
-		return nil
-	}
-	c.respondOK(msg.ID, session.id, stream.id, streamStartResponse{
-		SessionID:      session.id,
-		StreamID:       stream.id,
-		Kind:           stream.kind,
-		State:          stream.state(),
-		WriterAttached: stream.writerAttached(c.id),
-	})
-	c.server.sendToAll(newProtocolMessage("event", "", session.id, "", "session.updated", "", 0, nil, session.summary(), nil))
-	stream.start()
-	return nil
-}
-
-func (c *clientConn) handleShellStart(msg *protocolMessage) error {
-	req, err := decodePayload[shellStartRequest](msg.Payload)
-	if err != nil {
-		return fmt.Errorf("decode shell.start payload: %w", err)
-	}
-	session, err := c.server.lookupSession(msg.SessionID)
-	if err != nil {
-		c.respondError(msg.ID, msg.SessionID, "", "SESSION_NOT_FOUND", err.Error())
-		return nil
-	}
-	stream, startErr := session.startShell(c, &req)
-	if startErr != nil {
-		c.respondError(msg.ID, msg.SessionID, "", protocolErrorCode(startErr), startErr.Error())
-		return nil
-	}
-	c.respondOK(msg.ID, session.id, stream.id, streamStartResponse{
-		SessionID:      session.id,
-		StreamID:       stream.id,
-		Kind:           stream.kind,
-		State:          stream.state(),
-		WriterAttached: stream.writerAttached(c.id),
-	})
-	c.server.sendToAll(newProtocolMessage("event", "", session.id, "", "session.updated", "", 0, nil, session.summary(), nil))
-	stream.start()
-	return nil
-}
-
-func (c *clientConn) handleStreamAttach(msg *protocolMessage) error {
-	req, err := decodePayload[streamAttachRequest](msg.Payload)
-	if err != nil {
-		return fmt.Errorf("decode stream.attach payload: %w", err)
-	}
-	session, stream, lookupErr := c.server.lookupStream(msg.SessionID, coalesce(req.StreamID, msg.StreamID))
-	if lookupErr != nil {
-		c.respondError(msg.ID, msg.SessionID, coalesce(req.StreamID, msg.StreamID), protocolErrorCode(lookupErr), lookupErr.Error())
-		return nil
-	}
-	resp, messages, attachErr := stream.attach(c, req.StdoutSeq, req.StderrSeq, req.Write)
-	if attachErr != nil {
-		c.respondError(msg.ID, session.id, stream.id, protocolErrorCode(attachErr), attachErr.Error())
-		return nil
-	}
-	c.respondOK(msg.ID, session.id, stream.id, resp)
-	for i := range messages {
-		c.sendMessage(messages[i])
-	}
-	return nil
-}
-
-func (c *clientConn) handleStreamDetach(msg *protocolMessage) error {
-	req, err := decodePayload[streamAttachRequest](msg.Payload)
-	if err != nil {
-		return fmt.Errorf("decode stream.detach payload: %w", err)
-	}
-	session, stream, lookupErr := c.server.lookupStream(msg.SessionID, coalesce(req.StreamID, msg.StreamID))
-	if lookupErr != nil {
-		c.respondError(msg.ID, msg.SessionID, coalesce(req.StreamID, msg.StreamID), protocolErrorCode(lookupErr), lookupErr.Error())
-		return nil
-	}
-	stream.detach(c.id)
-	c.respondOK(msg.ID, session.id, stream.id, streamAttachResponse{
-		SessionID:      session.id,
-		StreamID:       stream.id,
-		State:          stream.state(),
-		WriterAttached: false,
-	})
-	return nil
-}
-
-func (c *clientConn) handleStreamWrite(msg *protocolMessage) error {
-	req, err := decodePayload[streamDataRequest](msg.Payload)
-	if err != nil {
-		return fmt.Errorf("decode stream.write payload: %w", err)
-	}
-	session, stream, lookupErr := c.server.lookupStream(msg.SessionID, msg.StreamID)
-	if lookupErr != nil {
-		c.respondError(msg.ID, msg.SessionID, msg.StreamID, protocolErrorCode(lookupErr), lookupErr.Error())
-		return nil
-	}
-	if err := stream.writeStdin(c.id, req.Encoding, req.Data); err != nil {
-		c.respondError(msg.ID, session.id, stream.id, protocolErrorCode(err), err.Error())
-		return nil
-	}
-	c.respondOK(msg.ID, session.id, stream.id, map[string]any{"written": true})
-	return nil
-}
-
-func (c *clientConn) handleStreamClose(msg *protocolMessage) error {
-	session, stream, lookupErr := c.server.lookupStream(msg.SessionID, msg.StreamID)
-	if lookupErr != nil {
-		c.respondError(msg.ID, msg.SessionID, msg.StreamID, protocolErrorCode(lookupErr), lookupErr.Error())
-		return nil
-	}
-	if err := stream.closeStdin(c.id); err != nil {
-		c.respondError(msg.ID, session.id, stream.id, protocolErrorCode(err), err.Error())
-		return nil
-	}
-	c.respondOK(msg.ID, session.id, stream.id, map[string]any{"closed": true})
-	return nil
-}
-
-func (c *clientConn) handleStreamCancel(msg *protocolMessage) error {
-	session, stream, lookupErr := c.server.lookupStream(msg.SessionID, msg.StreamID)
-	if lookupErr != nil {
-		c.respondError(msg.ID, msg.SessionID, msg.StreamID, protocolErrorCode(lookupErr), lookupErr.Error())
-		return nil
-	}
-	stream.cancelStream()
-	c.respondOK(msg.ID, session.id, stream.id, map[string]any{"canceled": true})
-	return nil
-}
-
-func coalesce(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

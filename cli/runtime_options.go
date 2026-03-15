@@ -6,7 +6,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +21,6 @@ type runtimeOptions struct {
 	server        bool
 	socket        string
 	sessionTTL    time.Duration
-	replayBytes   int
 }
 
 func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
@@ -90,22 +88,6 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 				return opts, nil, fmt.Errorf("parse --session-ttl: %w", err)
 			}
 			opts.sessionTTL = ttl
-		case arg == "--replay-bytes":
-			if i+1 >= len(args) {
-				return opts, nil, fmt.Errorf("--replay-bytes requires an integer")
-			}
-			i++
-			replayBytes, err := strconv.Atoi(args[i])
-			if err != nil {
-				return opts, nil, fmt.Errorf("parse --replay-bytes: %w", err)
-			}
-			opts.replayBytes = replayBytes
-		case strings.HasPrefix(arg, "--replay-bytes="):
-			replayBytes, err := strconv.Atoi(strings.TrimPrefix(arg, "--replay-bytes="))
-			if err != nil {
-				return opts, nil, fmt.Errorf("parse --replay-bytes: %w", err)
-			}
-			opts.replayBytes = replayBytes
 		case arg == "--":
 			rest = append(rest, args[i:]...)
 			return opts, rest, nil
@@ -248,9 +230,8 @@ func renderHelp(w io.Writer, name string) error {
 		"\nCLI output options:\n"+
 		"  --json                emit one JSON result object for a non-interactive execution\n"+
 		"\nCLI server options:\n"+
-		"  --server              run the shared gbash server instead of executing a script\n"+
-		"  --socket PATH         listen on PATH for Unix domain socket clients\n"+
-		"  --session-ttl DURATION  keep detached sessions alive for DURATION before expiry\n"+
-		"  --replay-bytes N      retain up to N bytes per stream channel for replay on reattach\n")
+		"  --server                run the shared gbash JSON-RPC server instead of executing a script\n"+
+		"  --socket PATH           listen on PATH for Unix domain socket clients\n"+
+		"  --session-ttl DURATION  keep idle sessions alive for DURATION before expiry\n")
 	return err
 }

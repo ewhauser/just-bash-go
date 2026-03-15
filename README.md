@@ -45,7 +45,7 @@ Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with pr
 ## Public Packages
 
 - `github.com/ewhauser/gbash`: the core Go runtime and embedding API
-- `github.com/ewhauser/gbash/server`: shared Unix-socket server mode for hosting persistent gbash sessions
+- `github.com/ewhauser/gbash/server`: shared Unix-socket JSON-RPC server mode for hosting persistent gbash sessions
 - `github.com/ewhauser/gbash/contrib/...`: optional Go command modules
 - `@ewhauser/gbash-wasm/browser`: the explicit browser entrypoint for the `js/wasm` package. It is versioned in-repo today; npm publishing remains disabled in the release workflow for now.
 - `@ewhauser/gbash-wasm/node`: the explicit Node entrypoint for the same `js/wasm` package.
@@ -227,7 +227,7 @@ For long-lived agent or editor integrations, the same shared CLI frontend can se
 gbash --server --socket /tmp/gbash.sock --session-ttl 30m
 ```
 
-The protocol models `session_id` as a persistent sandbox session and treats `exec.start` and `shell.start` as child streams inside that session. Stream output is asynchronous event data keyed by `session_id`, `stream_id`, `channel`, and per-channel sequence numbers. Filesystem shape is still chosen at server startup through the normal CLI/runtime options such as `--root`, `--readwrite-root`, and `--cwd`; it is not configured over the wire.
+The server speaks JSON-RPC 2.0 over the Unix socket. `session_id` maps 1:1 to a persistent sandbox session, and `session.exec` runs one non-interactive shell execution inside that session and returns the full result in one response. Filesystem shape is still chosen at server startup through the normal CLI/runtime options such as `--root`, `--readwrite-root`, and `--cwd`; it is not configured over the wire.
 
 Install `gbash-extras` when you want the same CLI surface with the stable official contrib commands (`awk`, `html-to-markdown`, `jq`, `sqlite3`, and `yq`) pre-registered:
 
@@ -235,7 +235,7 @@ Install `gbash-extras` when you want the same CLI surface with the stable offici
 gbash-extras -c 'jq -r .name data.json'
 ```
 
-`gbash-extras --server --socket /tmp/gbash-extras.sock` exposes the same protocol with the stable extras registry already installed.
+`gbash-extras --server --socket /tmp/gbash-extras.sock` exposes the same JSON-RPC protocol with the stable extras registry already installed.
 
 The shared frontend is also exposed as the public `github.com/ewhauser/gbash/cli` package. Call `cli.Run` with a `cli.Config` to reuse the stock flag parsing, interactive mode, server mode, and runtime setup from your own wrapper binary. For direct embedding without going through the CLI package, use `github.com/ewhauser/gbash/server`.
 ## Configuration

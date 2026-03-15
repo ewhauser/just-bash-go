@@ -92,11 +92,10 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 	if runtimeOpts.server {
 		meta := currentBuildInfo(cfg.Build)
 		err = gbserver.ListenAndServeUnix(ctx, runtimeOpts.socket, gbserver.Config{
-			Runtime:     rt,
-			Name:        cfg.Name,
-			Version:     meta.Version,
-			SessionTTL:  runtimeOpts.sessionTTL,
-			ReplayBytes: runtimeOpts.replayBytes,
+			Runtime:    rt,
+			Name:       cfg.Name,
+			Version:    meta.Version,
+			SessionTTL: runtimeOpts.sessionTTL,
 		})
 		if err != nil {
 			return 1, fmt.Errorf("server error: %w", err)
