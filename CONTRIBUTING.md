@@ -31,7 +31,7 @@ Typical local workflow:
 3. Keep the minimized input under `testdata/fuzz/...` if it still adds regression value after the fix.
 4. Re-run the owning fuzz target plus the relevant shard.
 
-CI uploads any generated fuzz corpus artifacts from failing fuzz jobs so minimized inputs can be downloaded directly from the workflow run.
+CI uploads any new or modified fuzz corpus files from failing fuzz jobs, along with a manifest of re-run commands and base64 copies so minimized inputs can be recovered directly from the workflow run.
 
 ## Module Versioning
 

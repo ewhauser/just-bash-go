@@ -33,16 +33,26 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: make fuzz-shard
+      - id: fuzz
+        continue-on-error: true
+        run: make fuzz-shard
         env:
           FUZZ_SHARD: ${{ matrix.make_var }}
           FUZZTIME: 10s
 
+      - id: collect_fuzz_artifacts
+        if: steps.fuzz.outcome == 'failure'
+        shell: bash
+        run: ./scripts/collect_fuzz_failure_artifacts.sh "$RUNNER_TEMP/fuzz-full-${{ matrix.shard }}-corpus"
+
       - name: Upload fuzz corpus artifacts
-        if: failure()
+        if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzz-full-${{ matrix.shard }}-corpus
-          if-no-files-found: ignore
-          path: |
-            **/testdata/fuzz/Fuzz*/*
+          if-no-files-found: error
+          path: ${{ steps.collect_fuzz_artifacts.outputs.artifact_dir }}
+
+      - name: Fail if fuzzing found a reproducer
+        if: steps.fuzz.outcome == 'failure'
+        run: exit 1

@@ -127,19 +127,29 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: make fuzz-shard
+      - id: fuzz
+        continue-on-error: true
+        run: make fuzz-shard
         env:
           FUZZ_SHARD: ${{ matrix.make_var }}
           FUZZTIME: ${{ matrix.fuzztime }}
 
+      - id: collect_fuzz_artifacts
+        if: steps.fuzz.outcome == 'failure'
+        shell: bash
+        run: ./scripts/collect_fuzz_failure_artifacts.sh "$RUNNER_TEMP/fuzz-pr-deep-${{ matrix.shard }}-corpus"
+
       - name: Upload fuzz corpus artifacts
-        if: failure()
+        if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzz-pr-deep-${{ matrix.shard }}-corpus
-          if-no-files-found: ignore
-          path: |
-            **/testdata/fuzz/Fuzz*/*
+          if-no-files-found: error
+          path: ${{ steps.collect_fuzz_artifacts.outputs.artifact_dir }}
+
+      - name: Fail if fuzzing found a reproducer
+        if: steps.fuzz.outcome == 'failure'
+        run: exit 1
 
   fuzz-pr-jq-deep:
     if: github.event_name == 'pull_request' && needs.detect-fuzz-changes.outputs.run_jq_deep == 'true'
@@ -153,19 +163,29 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: make fuzz-run
+      - id: fuzz
+        continue-on-error: true
+        run: make fuzz-run
         env:
           FUZZ_TARGETS: ./contrib/jq:FuzzJQCompatibilityFlags ./contrib/jq:FuzzJQCommands
           FUZZTIME: 15s
 
+      - id: collect_fuzz_artifacts
+        if: steps.fuzz.outcome == 'failure'
+        shell: bash
+        run: ./scripts/collect_fuzz_failure_artifacts.sh "$RUNNER_TEMP/fuzz-pr-jq-corpus"
+
       - name: Upload fuzz corpus artifacts
-        if: failure()
+        if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzz-pr-jq-corpus
-          if-no-files-found: ignore
-          path: |
-            **/testdata/fuzz/Fuzz*/*
+          if-no-files-found: error
+          path: ${{ steps.collect_fuzz_artifacts.outputs.artifact_dir }}
+
+      - name: Fail if fuzzing found a reproducer
+        if: steps.fuzz.outcome == 'failure'
+        run: exit 1
 
   fuzz-pr-yq-deep:
     if: github.event_name == 'pull_request' && needs.detect-fuzz-changes.outputs.run_yq_deep == 'true'
@@ -179,19 +199,29 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: make fuzz-run
+      - id: fuzz
+        continue-on-error: true
+        run: make fuzz-run
         env:
           FUZZ_TARGETS: ./contrib/yq:FuzzYQCommands
           FUZZTIME: 15s
 
+      - id: collect_fuzz_artifacts
+        if: steps.fuzz.outcome == 'failure'
+        shell: bash
+        run: ./scripts/collect_fuzz_failure_artifacts.sh "$RUNNER_TEMP/fuzz-pr-yq-corpus"
+
       - name: Upload fuzz corpus artifacts
-        if: failure()
+        if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzz-pr-yq-corpus
-          if-no-files-found: ignore
-          path: |
-            **/testdata/fuzz/Fuzz*/*
+          if-no-files-found: error
+          path: ${{ steps.collect_fuzz_artifacts.outputs.artifact_dir }}
+
+      - name: Fail if fuzzing found a reproducer
+        if: steps.fuzz.outcome == 'failure'
+        run: exit 1
 
   fuzz-pr-sqlite3-deep:
     if: github.event_name == 'pull_request' && needs.detect-fuzz-changes.outputs.run_sqlite3_deep == 'true'
@@ -205,16 +235,26 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: make fuzz-run
+      - id: fuzz
+        continue-on-error: true
+        run: make fuzz-run
         env:
           FUZZ_TARGETS: ./contrib/sqlite3:FuzzSQLiteCommands ./contrib/sqlite3:FuzzSQLiteFileCommands
           FUZZTIME: 15s
 
+      - id: collect_fuzz_artifacts
+        if: steps.fuzz.outcome == 'failure'
+        shell: bash
+        run: ./scripts/collect_fuzz_failure_artifacts.sh "$RUNNER_TEMP/fuzz-pr-sqlite3-corpus"
+
       - name: Upload fuzz corpus artifacts
-        if: failure()
+        if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzz-pr-sqlite3-corpus
-          if-no-files-found: ignore
-          path: |
-            **/testdata/fuzz/Fuzz*/*
+          if-no-files-found: error
+          path: ${{ steps.collect_fuzz_artifacts.outputs.artifact_dir }}
+
+      - name: Fail if fuzzing found a reproducer
+        if: steps.fuzz.outcome == 'failure'
+        run: exit 1
