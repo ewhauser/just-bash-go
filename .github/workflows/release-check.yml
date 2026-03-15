@@ -38,15 +38,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          run_install: false
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          cache: pnpm
           node-version: "20"
 
       - name: Install workspace dependencies
-        run: npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build @ewhauser/gbash-wasm
-        run: npm exec --yes pnpm@10.10.0 -- --filter @ewhauser/gbash-wasm build
+        run: pnpm --filter @ewhauser/gbash-wasm build
 
   website-export:
     runs-on: ubuntu-latest
@@ -57,12 +62,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          run_install: false
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          cache: pnpm
           node-version: "20"
 
       - name: Install workspace dependencies
-        run: npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build website export
         env:

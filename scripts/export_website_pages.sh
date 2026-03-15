@@ -13,7 +13,7 @@ fi
 (
   cd "$repo_dir"
   GBASH_WEBSITE_EXPORT="${GBASH_WEBSITE_EXPORT:-1}" \
-  npm exec --yes pnpm@10.10.0 -- --dir website build
+  pnpm --dir website build
 )
 
 rm -rf "$output_dir"

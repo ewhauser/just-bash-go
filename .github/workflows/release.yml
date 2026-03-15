@@ -98,8 +98,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          run_install: false
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          cache: pnpm
           node-version: "20"
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
@@ -150,7 +155,7 @@ jobs:
         run: git checkout --force "${VERSION}"
 
       - name: Install workspace dependencies
-        run: npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build website Pages bundle
         env:
@@ -246,7 +251,7 @@ jobs:
       #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       #   run: |
       #     set -euo pipefail
-      #     npm exec --yes pnpm@10.10.0 -- --filter @ewhauser/gbash-wasm build
+      #     pnpm --filter @ewhauser/gbash-wasm build
       #     cd packages/gbash-wasm
       #     npm publish --access public
       #
