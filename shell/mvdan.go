@@ -18,6 +18,7 @@ import (
 	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/commandutil"
+	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/network"
 	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/trace"
@@ -47,6 +48,7 @@ type Execution struct {
 	VisiblePWD        string
 	HasVisiblePWD     bool
 	BuiltinCommandDir string
+	CompletionState   *shellstate.CompletionState
 	Stdin             io.Reader
 	Stdout            io.Writer
 	Stderr            io.Writer
@@ -153,6 +155,9 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 	}
 	if exec.Trace == nil {
 		exec.Trace = trace.NopRecorder{}
+	}
+	if exec.CompletionState == nil {
+		exec.CompletionState = shellstate.NewCompletionState()
 	}
 	budget := newExecutionBudget(exec.Policy, runtimePreludeLineCount())
 	if err := instrumentLoopBudgets(program, exec.Policy); err != nil {
@@ -423,7 +428,8 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 				return exec.Registry.Names()
 			},
 		})
-		err = commands.RunCommand(ctx, resolved.command, invocation)
+		commandCtx := shellstate.WithCompletionState(ctx, completionStateForExecution(exec))
+		err = commands.RunCommand(commandCtx, resolved.command, invocation)
 		if syncErr := syncCommandHistory(ctx, &hc, currentEnv, invocation.Env); syncErr != nil {
 			return syncErr
 		}
@@ -494,6 +500,16 @@ func interactiveInvoker(interactFn func(context.Context, *commands.InteractiveRe
 		normalized := normalizeInteractiveRequest(req, currentEnv, currentDir)
 		return interactFn(ctx, normalized)
 	}
+}
+
+func completionStateForExecution(exec *Execution) *shellstate.CompletionState {
+	if exec == nil {
+		return shellstate.NewCompletionState()
+	}
+	if exec.CompletionState == nil {
+		exec.CompletionState = shellstate.NewCompletionState()
+	}
+	return exec.CompletionState
 }
 
 func normalizeSubexecRequest(req *commands.ExecutionRequest, currentEnv map[string]string, currentDir string) *commands.ExecutionRequest {
