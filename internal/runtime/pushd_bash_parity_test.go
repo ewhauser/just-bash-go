@@ -14,7 +14,9 @@ var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?bash: line \d+
 
 // These cases track observable directory-stack command behavior. They
 // intentionally do not cover shell introspection like `type pushd`, which
-// still differs because gbash currently injects shell functions here.
+// still differs because gbash currently injects shell functions here. The
+// harness also normalizes older Bash 3.2 usage text/status for invalid-usage
+// cases to the newer Bash form used in CI.
 func TestDirectoryStackMatchesBashBehavior(t *testing.T) {
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
@@ -190,11 +192,11 @@ func runDirectoryStackGBash(t testing.TB, script string) normalizedExecutionResu
 	if err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
-	return normalizedExecutionResult{
+	return normalizeDirectoryStackResult(normalizedExecutionResult{
 		ExitCode: result.ExitCode,
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
-	}
+	})
 }
 
 func runDirectoryStackBash(t testing.TB, bashPath, homeDir, script string) normalizedExecutionResult {
@@ -224,14 +226,23 @@ func runDirectoryStackBash(t testing.TB, bashPath, homeDir, script string) norma
 		exitCode = exitErr.ExitCode()
 	}
 
-	return normalizedExecutionResult{
+	return normalizeDirectoryStackResult(normalizedExecutionResult{
 		ExitCode: exitCode,
 		Stdout:   normalizeDirectoryStackOutput(stdout.String(), homeDir),
 		Stderr:   normalizeDirectoryStackOutput(stderr.String(), homeDir),
-	}
+	})
 }
 
 func normalizeDirectoryStackOutput(value, homeDir string) string {
 	value = strings.ReplaceAll(value, filepath.ToSlash(homeDir), "/home/agent")
 	return bashLinePrefixPattern.ReplaceAllString(value, "")
+}
+
+func normalizeDirectoryStackResult(result normalizedExecutionResult) normalizedExecutionResult {
+	result.Stderr = strings.ReplaceAll(result.Stderr, "pushd: usage: pushd [dir | +N | -N] [-n]\n", "pushd: usage: pushd [-n] [+N | -N | dir]\n")
+	result.Stderr = strings.ReplaceAll(result.Stderr, "popd: usage: popd [+N | -N] [-n]\n", "popd: usage: popd [-n] [+N | -N]\n")
+	if result.ExitCode == 1 && strings.Contains(result.Stderr, "usage:") && strings.Contains(result.Stderr, "invalid number") {
+		result.ExitCode = 2
+	}
+	return result
 }

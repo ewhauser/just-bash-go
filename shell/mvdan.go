@@ -899,11 +899,11 @@ __jb_dirs_usage() {
 }
 
 __jb_pushd_usage() {
-	printf 'pushd: usage: pushd [dir | +N | -N] [-n]\n' >&2
+	printf 'pushd: usage: pushd [-n] [+N | -N | dir]\n' >&2
 }
 
 __jb_popd_usage() {
-	printf 'popd: usage: popd [+N | -N] [-n]\n' >&2
+	printf 'popd: usage: popd [-n] [+N | -N]\n' >&2
 }
 
 __jb_dirs_print_path() {
@@ -951,7 +951,7 @@ __jb_stack_parse_index() {
 					__jb_popd_usage
 					;;
 			esac
-			return 1
+			return 2
 			;;
 	esac
 	return 0
@@ -1012,14 +1012,14 @@ dirs() {
 			+[0-9]*|-[0-9]*)
 				if [ -n "$__jb_dirs_index_arg" ]; then
 					__jb_dirs_usage
-					return 1
+					return 2
 				fi
 				__jb_dirs_index_arg=$1
 				;;
 			+*)
 				printf 'dirs: %%s: invalid number\n' "$1" >&2
 				__jb_dirs_usage
-				return 1
+				return 2
 				;;
 			-[clpv]*)
 				__jb_dirs_arg=$1
@@ -1043,7 +1043,7 @@ dirs() {
 						*)
 							printf 'dirs: %%s: invalid number\n' "$__jb_dirs_arg" >&2
 							__jb_dirs_usage
-							return 1
+							return 2
 							;;
 					esac
 				done
@@ -1051,18 +1051,18 @@ dirs() {
 			-*)
 				printf 'dirs: %%s: invalid number\n' "$1" >&2
 				__jb_dirs_usage
-				return 1
+				return 2
 				;;
 			*)
 				__jb_dirs_usage
-				return 1
+				return 2
 				;;
 		esac
 		shift
 	done
 	if [ "$#" -gt 0 ]; then
 		__jb_dirs_usage
-		return 1
+		return 2
 	fi
 
 	if [ -n "$__jb_dirs_clear" ]; then
@@ -1079,7 +1079,7 @@ dirs() {
 	fi
 
 	if [ -n "$__jb_dirs_index_arg" ]; then
-		__jb_stack_parse_index "$__jb_dirs_index_arg" dirs || return 1
+		__jb_stack_parse_index "$__jb_dirs_index_arg" dirs || return $?
 		if [ "${#__JB_DIR_STACK[@]}" -le 1 ] && [ "$__jb_stack_index" -ne 0 ]; then
 			printf 'dirs: directory stack empty\n' >&2
 			return 1
@@ -1178,24 +1178,24 @@ pushd() {
 			+[0-9]*|-[0-9]*)
 				if [ -n "$__jb_pushd_operand" ]; then
 					__jb_pushd_usage
-					return 1
+					return 2
 				fi
 				__jb_pushd_operand=$1
 				;;
 			+*)
 				printf 'pushd: %%s: invalid number\n' "$1" >&2
 				__jb_pushd_usage
-				return 1
+				return 2
 				;;
 			-*)
 				printf 'pushd: %%s: invalid number\n' "$1" >&2
 				__jb_pushd_usage
-				return 1
+				return 2
 				;;
 			*)
 				if [ -n "$__jb_pushd_operand" ]; then
 					__jb_pushd_usage
-					return 1
+					return 2
 				fi
 				__jb_pushd_operand=$1
 				;;
@@ -1204,12 +1204,12 @@ pushd() {
 	done
 	if [ "$#" -gt 1 ]; then
 		__jb_pushd_usage
-		return 1
+		return 2
 	fi
 	if [ "$#" -eq 1 ]; then
 		if [ -n "$__jb_pushd_operand" ]; then
 			__jb_pushd_usage
-			return 1
+			return 2
 		fi
 		__jb_pushd_operand=$1
 	fi
@@ -1225,7 +1225,7 @@ pushd() {
 
 	case "$__jb_pushd_operand" in
 		+[0-9]*|-[0-9]*)
-			__jb_stack_parse_index "$__jb_pushd_operand" pushd || return 1
+			__jb_stack_parse_index "$__jb_pushd_operand" pushd || return $?
 			if [ "$__jb_stack_index" -eq 0 ]; then
 				dirs
 				return $?
@@ -1295,7 +1295,7 @@ popd() {
 			+[0-9]*|-[0-9]*)
 				if [ -n "$__jb_popd_operand_explicit" ]; then
 					__jb_popd_usage
-					return 1
+					return 2
 				fi
 				__jb_popd_operand=$1
 				__jb_popd_operand_explicit=1
@@ -1303,30 +1303,30 @@ popd() {
 			+*)
 				printf 'popd: %%s: invalid number\n' "$1" >&2
 				__jb_popd_usage
-				return 1
+				return 2
 				;;
 			-*)
 				printf 'popd: %%s: invalid number\n' "$1" >&2
 				__jb_popd_usage
-				return 1
+				return 2
 				;;
 			*)
 				__jb_popd_usage
-				return 1
+				return 2
 				;;
 		esac
 		shift
 	done
 	if [ "$#" -gt 0 ]; then
 		__jb_popd_usage
-		return 1
+		return 2
 	fi
 	if [ "${#__JB_DIR_STACK[@]}" -le 1 ]; then
 		printf 'popd: directory stack empty\n' >&2
 		return 1
 	fi
 
-	__jb_stack_parse_index "$__jb_popd_operand" popd || return 1
+	__jb_stack_parse_index "$__jb_popd_operand" popd || return $?
 	if [ "$__jb_stack_index" -lt 0 ] || [ "$__jb_stack_index" -ge "${#__JB_DIR_STACK[@]}" ]; then
 		printf 'popd: %%s: directory stack index out of range\n' "$__jb_popd_operand" >&2
 		return 1
