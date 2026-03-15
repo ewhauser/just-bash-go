@@ -110,12 +110,16 @@ jobs:
         include:
           - shard: shard-1
             make_var: FUZZ_FULL_SHARD_1
+            fuzztime: 15s
           - shard: shard-2
             make_var: FUZZ_FULL_SHARD_2
+            fuzztime: 20s
           - shard: shard-3
             make_var: FUZZ_FULL_SHARD_3
+            fuzztime: 15s
           - shard: shard-4
             make_var: FUZZ_FULL_SHARD_4
+            fuzztime: 15s
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -126,7 +130,7 @@ jobs:
       - run: make fuzz-shard
         env:
           FUZZ_SHARD: ${{ matrix.make_var }}
-          FUZZTIME: 15s
+          FUZZTIME: ${{ matrix.fuzztime }}
 
       - name: Upload fuzz corpus artifacts
         if: failure()
