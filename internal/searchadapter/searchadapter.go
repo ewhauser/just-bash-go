@@ -156,12 +156,15 @@ func scanPath(ctx context.Context, fsys gbfs.FileSystem, currentRoot, current st
 	}
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
 		info, err := fsys.Stat(ctx, current)
-		if err != nil || info.IsDir() {
+		if err != nil || !scanIndexableFileInfo(info) {
 			return nil
 		}
 		return scanFile(ctx, fsys, currentRoot, current, query, verify, hits, truncated)
 	}
 	if !linfo.IsDir() {
+		if !scanIndexableFileInfo(linfo) {
+			return nil
+		}
 		return scanFile(ctx, fsys, currentRoot, current, query, verify, hits, truncated)
 	}
 
@@ -183,6 +186,10 @@ func scanPath(ctx context.Context, fsys gbfs.FileSystem, currentRoot, current st
 		}
 	}
 	return nil
+}
+
+func scanIndexableFileInfo(info stdfs.FileInfo) bool {
+	return info != nil && info.Mode().IsRegular()
 }
 
 func scanFile(ctx context.Context, fsys gbfs.FileSystem, root, name string, query *Query, verify VerifyFunc, hits *[]gbfs.SearchHit, truncated *bool) error {

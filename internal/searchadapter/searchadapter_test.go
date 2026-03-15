@@ -1,13 +1,16 @@
 package searchadapter
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 	"os"
 	"path"
 	"slices"
 	"testing"
+	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 )
@@ -65,6 +68,25 @@ func TestSearchFallbackWhenUnsupported(t *testing.T) {
 		t.Fatal("UsedIndex = true, want false")
 	}
 	if got, want := hitPaths(result.Hits), []string{"/workspace/a.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("Paths = %v, want %v", got, want)
+	}
+}
+
+func TestSearchFallbackSkipsSpecialFiles(t *testing.T) {
+	fsys := fallbackFixtureFS{}
+
+	result, err := Search(context.Background(), fsys, &Query{
+		Roots:         []string{"/"},
+		Literal:       "needle",
+		IndexEligible: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if result.UsedIndex {
+		t.Fatal("UsedIndex = true, want false")
+	}
+	if got, want := hitPaths(result.Hits), []string{"/regular.txt"}; !slices.Equal(got, want) {
 		t.Fatalf("Paths = %v, want %v", got, want)
 	}
 }
@@ -384,3 +406,118 @@ func hitPaths(hits []gbfs.SearchHit) []string {
 	}
 	return out
 }
+
+type fallbackFixtureFS struct{}
+
+func (fallbackFixtureFS) Open(_ context.Context, name string) (gbfs.File, error) {
+	switch gbfs.Clean(name) {
+	case "/regular.txt":
+		info := fallbackFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}
+		return fallbackFixtureFile{Reader: bytes.NewReader([]byte("needle\n")), info: info}, nil
+	case "/special.pipe":
+		return nil, fmt.Errorf("special file should not be opened")
+	case "/special-link":
+		return nil, fmt.Errorf("special symlink target should not be opened")
+	default:
+		return nil, &os.PathError{Op: "open", Path: gbfs.Clean(name), Err: stdfs.ErrNotExist}
+	}
+}
+
+func (fs fallbackFixtureFS) OpenFile(ctx context.Context, name string, _ int, _ stdfs.FileMode) (gbfs.File, error) {
+	return fs.Open(ctx, name)
+}
+
+func (fallbackFixtureFS) Stat(_ context.Context, name string) (stdfs.FileInfo, error) {
+	switch gbfs.Clean(name) {
+	case "/":
+		return fallbackFixtureInfo{name: "/", mode: stdfs.ModeDir | 0o755}, nil
+	case "/regular.txt":
+		return fallbackFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}, nil
+	case "/special.pipe":
+		return fallbackFixtureInfo{name: "special.pipe", mode: stdfs.ModeNamedPipe}, nil
+	case "/special-link":
+		return fallbackFixtureInfo{name: "special-link", mode: stdfs.ModeNamedPipe}, nil
+	default:
+		return nil, &os.PathError{Op: "stat", Path: gbfs.Clean(name), Err: stdfs.ErrNotExist}
+	}
+}
+
+func (fallbackFixtureFS) Lstat(_ context.Context, name string) (stdfs.FileInfo, error) {
+	switch gbfs.Clean(name) {
+	case "/":
+		return fallbackFixtureInfo{name: "/", mode: stdfs.ModeDir | 0o755}, nil
+	case "/regular.txt":
+		return fallbackFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}, nil
+	case "/special.pipe":
+		return fallbackFixtureInfo{name: "special.pipe", mode: stdfs.ModeNamedPipe}, nil
+	case "/special-link":
+		return fallbackFixtureInfo{name: "special-link", mode: stdfs.ModeSymlink | 0o777, size: int64(len("special.pipe"))}, nil
+	default:
+		return nil, &os.PathError{Op: "lstat", Path: gbfs.Clean(name), Err: stdfs.ErrNotExist}
+	}
+}
+
+func (fallbackFixtureFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, error) {
+	if gbfs.Clean(name) != "/" {
+		return nil, &os.PathError{Op: "readdir", Path: gbfs.Clean(name), Err: stdfs.ErrNotExist}
+	}
+	return []stdfs.DirEntry{
+		stdfs.FileInfoToDirEntry(fallbackFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}),
+		stdfs.FileInfoToDirEntry(fallbackFixtureInfo{name: "special.pipe", mode: stdfs.ModeNamedPipe}),
+		stdfs.FileInfoToDirEntry(fallbackFixtureInfo{name: "special-link", mode: stdfs.ModeSymlink | 0o777, size: int64(len("special.pipe"))}),
+	}, nil
+}
+
+func (fallbackFixtureFS) Readlink(_ context.Context, name string) (string, error) {
+	if gbfs.Clean(name) == "/special-link" {
+		return "special.pipe", nil
+	}
+	return "", &os.PathError{Op: "readlink", Path: gbfs.Clean(name), Err: stdfs.ErrInvalid}
+}
+
+func (fallbackFixtureFS) Realpath(_ context.Context, name string) (string, error) {
+	return gbfs.Clean(name), nil
+}
+
+func (fallbackFixtureFS) Symlink(context.Context, string, string) error { return stdfs.ErrPermission }
+func (fallbackFixtureFS) Link(context.Context, string, string) error    { return stdfs.ErrPermission }
+func (fallbackFixtureFS) Chown(context.Context, string, uint32, uint32, bool) error {
+	return stdfs.ErrPermission
+}
+func (fallbackFixtureFS) Chmod(context.Context, string, stdfs.FileMode) error {
+	return stdfs.ErrPermission
+}
+func (fallbackFixtureFS) Chtimes(context.Context, string, time.Time, time.Time) error {
+	return stdfs.ErrPermission
+}
+func (fallbackFixtureFS) MkdirAll(context.Context, string, stdfs.FileMode) error {
+	return stdfs.ErrPermission
+}
+func (fallbackFixtureFS) Remove(context.Context, string, bool) error   { return stdfs.ErrPermission }
+func (fallbackFixtureFS) Rename(context.Context, string, string) error { return stdfs.ErrPermission }
+func (fallbackFixtureFS) Getwd() string                                { return "/" }
+func (fallbackFixtureFS) Chdir(string) error                           { return stdfs.ErrPermission }
+
+type fallbackFixtureFile struct {
+	*bytes.Reader
+	info stdfs.FileInfo
+}
+
+func (fallbackFixtureFile) Write([]byte) (int, error) { return 0, stdfs.ErrPermission }
+func (fallbackFixtureFile) Close() error              { return nil }
+func (f fallbackFixtureFile) Stat() (stdfs.FileInfo, error) {
+	return f.info, nil
+}
+
+type fallbackFixtureInfo struct {
+	name string
+	mode stdfs.FileMode
+	size int64
+}
+
+func (i fallbackFixtureInfo) Name() string         { return i.name }
+func (i fallbackFixtureInfo) Size() int64          { return i.size }
+func (i fallbackFixtureInfo) Mode() stdfs.FileMode { return i.mode }
+func (i fallbackFixtureInfo) ModTime() time.Time   { return time.Unix(0, 0).UTC() }
+func (i fallbackFixtureInfo) IsDir() bool          { return i.mode.IsDir() }
+func (i fallbackFixtureInfo) Sys() any             { return nil }
