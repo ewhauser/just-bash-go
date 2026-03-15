@@ -874,6 +874,37 @@ func TestLSSupportsQuotingAliasAndWidthZeroWithTabsize(t *testing.T) {
 	}
 }
 
+func TestLSLongShellEscapeSpacingRespectsTimeStyleEnv(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-quote-align/a b", []byte("a"))
+	writeSessionFile(t, session, "/tmp/ls-quote-align/c.foo", []byte("b"))
+
+	result := mustExecSession(t, session,
+		"cd /tmp\n"+
+			"env TERM=xterm LS_COLORS='*.foo=0;31;42' ls -x --quoting=shell-escape --color=always ls-quote-align\n"+
+			"echo ---\n"+
+			"env TERM=xterm LS_COLORS='*.foo=0;31;42' TIME_STYLE=+T ls -og --quoting=shell-escape --color=always ls-quote-align\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+	if !strings.Contains(parts[0], "'a b'   \x1b[0m\x1b[0;31;42mc.foo\x1b[0m") {
+		t.Fatalf("grid output = %q, want GNU spacing for quoted/colorized grid cells", parts[0])
+	}
+	if !regexp.MustCompile(`\sT 'a b'`).MatchString(parts[1]) {
+		t.Fatalf("long output = %q, want TIME_STYLE env to drive +T timestamps", parts[1])
+	}
+	if !regexp.MustCompile(`\n.*  \x1b\[0m\x1b\[0;31;42mc\.foo\x1b\[0m\n`).MatchString(parts[1]) {
+		t.Fatalf("long output = %q, want GNU shell-escape spacing for unquoted names", parts[1])
+	}
+}
+
 func TestLSInvalidWidthValuesUseGNUUsageExitCode(t *testing.T) {
 	session := newSession(t, &Config{})
 

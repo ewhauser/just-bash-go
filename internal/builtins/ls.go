@@ -37,6 +37,7 @@ type lsOptions struct {
 	directoryOnly         bool
 	format                lsFormatMode
 	width                 int
+	tabSize               int
 	zero                  bool
 	colorMode             lsColorMode
 	hyperlinkMode         lsColorMode
@@ -356,6 +357,10 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 	if err != nil {
 		return lsOptions{}, err
 	}
+	tabSize, err := parseLSTabSize(inv, matches)
+	if err != nil {
+		return lsOptions{}, err
+	}
 	blockSize, err := parseLSBlockSize(inv, matches)
 	if err != nil {
 		return lsOptions{}, err
@@ -405,6 +410,7 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 		directoryOnly:         matches.Has("directory"),
 		format:                format,
 		width:                 width,
+		tabSize:               tabSize,
 		zero:                  matches.Has("zero"),
 		colorMode:             colorMode,
 		hyperlinkMode:         hyperlinkMode,
@@ -852,7 +858,7 @@ func lsRenderNames(names []string, opts *lsOptions, forceColumns bool) string {
 		return lsRenderCommaNames(names, opts.width) + "\n"
 	}
 	if forceColumns || opts.format == lsFormatColumns || opts.format == lsFormatAcross {
-		return lsRenderGrid(names, opts.format == lsFormatAcross, opts.width) + "\n"
+		return lsRenderGrid(names, opts.format == lsFormatAcross, opts.width, opts.tabSize) + "\n"
 	}
 	return strings.Join(names, "\n") + "\n"
 }
@@ -892,7 +898,7 @@ func lsDiredQuotingStyle(mode lsQuotingMode) string {
 	}
 }
 
-func lsRenderGrid(names []string, across bool, width int) string {
+func lsRenderGrid(names []string, across bool, width, _ int) string {
 	displayWidths := make([]int, len(names))
 	maxWidth := 0
 	for i, name := range names {
@@ -902,6 +908,14 @@ func lsRenderGrid(names []string, across bool, width int) string {
 		}
 	}
 	colWidth := maxWidth + 2
+	if width > 0 {
+		for _, name := range names {
+			if strings.Contains(name, "\x1b") || strings.ContainsAny(name, `'"`) {
+				colWidth++
+				break
+			}
+		}
+	}
 	if colWidth <= 0 {
 		colWidth = 1
 	}
@@ -1079,6 +1093,8 @@ func parseLSFormat(inv *Invocation, matches *ParsedCommand) (lsFormatMode, bool,
 		case "commas":
 			format = lsFormatCommas
 			longFormat = false
+		case "long-no-group", "long-no-owner":
+			longFormat = true
 		case "long":
 			longFormat = true
 		case "format":
@@ -1243,6 +1259,22 @@ func parseLSWidth(inv *Invocation, matches *ParsedCommand) (int, error) {
 	return int(width), nil
 }
 
+func parseLSTabSize(inv *Invocation, matches *ParsedCommand) (int, error) {
+	if !matches.Has("tabsize") {
+		return 8, nil
+	}
+	value := matches.Value("tabsize")
+	tabSize, err := strconv.ParseUint(value, 0, 64)
+	if err != nil {
+		return 0, exitf(inv, 2, "ls: invalid tab size: %s\nTry 'ls --help' for more information.", quoteGNUOperand(value))
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if tabSize > maxInt {
+		return int(maxInt), nil
+	}
+	return int(tabSize), nil
+}
+
 func lsJoinRecursiveTarget(base, name string) string {
 	switch {
 	case base == ".":
@@ -1300,24 +1332,24 @@ func parseLSBlockSizeValue(inv *Invocation, value string) (int64, error) {
 }
 
 func parseLSTimeStyle(inv *Invocation, matches *ParsedCommand) (string, error) {
-	style := ""
+	style := strings.TrimSpace(inv.Env["TIME_STYLE"])
 	for _, option := range matches.OptionOrder() {
 		switch option {
 		case "time-style":
 			style = matches.Value("time-style")
-			switch style {
-			case "full-iso", "long-iso", "iso", "locale":
-			default:
-				if strings.HasPrefix(style, "+") {
-					continue
-				}
-				return "", exitf(inv, 2, "ls: invalid argument %s for 'time style'\nValid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n  - [posix-]iso\n  - [posix-]locale\n  - +FORMAT (e.g., +%%H:%%M) for a 'date'-style format\nTry 'ls --help' for more information.", quoteGNUOperand(style))
-			}
 		case "full-time":
 			style = "full-iso"
 		}
 	}
-	return style, nil
+	switch style {
+	case "", "full-iso", "long-iso", "iso", "locale":
+		return style, nil
+	default:
+		if strings.HasPrefix(style, "+") {
+			return style, nil
+		}
+		return "", exitf(inv, 2, "ls: invalid argument %s for 'time style'\nValid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n  - [posix-]iso\n  - [posix-]locale\n  - +FORMAT (e.g., +%%H:%%M) for a 'date'-style format\nTry 'ls --help' for more information.", quoteGNUOperand(style))
+	}
 }
 
 func parseLSDereferenceMode(matches *ParsedCommand, longFormat bool, indicator lsIndicatorMode) lsDereferenceMode {
@@ -1341,6 +1373,13 @@ func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, 
 	if err != nil {
 		return "", nil, err
 	}
+	leadingSpace := opts.longFormat && opts.quotingMode == lsQuoteShell && !lsNeedsShellQuoting(rawName)
+	if leadingSpace {
+		for i := range diredRanges {
+			diredRanges[i].start++
+			diredRanges[i].end++
+		}
+	}
 	suffix, linfo, err := lsSuffixAndInfo(ctx, inv, abs, info, rawName, opts)
 	if err != nil {
 		return "", nil, err
@@ -1350,6 +1389,9 @@ func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, 
 		display = lsHyperlink(display, abs)
 	}
 	if !lsShouldUseColor(inv, opts.colorMode) {
+		if leadingSpace {
+			display = " " + display
+		}
 		return display, diredRanges, nil
 	}
 	code, err := lsColorCode(ctx, inv, abs, info, linfo)
@@ -1357,7 +1399,13 @@ func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, 
 		return "", nil, err
 	}
 	if code == "" {
+		if leadingSpace {
+			display = " " + display
+		}
 		return display, diredRanges, nil
+	}
+	if leadingSpace {
+		return " " + "\x1b[0m\x1b[" + code + "m" + display + "\x1b[0m", diredRanges, nil
 	}
 	return "\x1b[0m\x1b[" + code + "m" + display + "\x1b[0m", diredRanges, nil
 }
