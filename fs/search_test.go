@@ -149,6 +149,29 @@ func TestSearchProviderQueries(t *testing.T) {
 	}
 }
 
+func TestSearchProviderHonorsContextCancellation(t *testing.T) {
+	base := seededMemory(t, map[string]string{
+		"/workspace/a.txt": "needle one\n",
+		"/workspace/b.txt": "needle two\n",
+		"/workspace/c.txt": "needle three\n",
+	})
+
+	fsys, err := NewSearchableFileSystem(context.Background(), base, nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	provider := mustSearchProvider(t, fsys, "/workspace")
+
+	ctx := &cancelAfterContext{remaining: 1}
+	_, err = provider.Search(ctx, &SearchQuery{
+		Root:    "/workspace",
+		Literal: "needle",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Search() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestSearchableFSMutations(t *testing.T) {
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
@@ -251,6 +274,36 @@ func TestSearchableFSTracksDanglingSymlinkUntilTargetExists(t *testing.T) {
 	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, []string{
 		"/docs/future.txt",
 		"/docs/link.txt",
+	})
+}
+
+func TestSearchableFSReindexesDanglingSymlinkChains(t *testing.T) {
+	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	provider := mustSearchProvider(t, fsys, "/")
+
+	if err := fsys.MkdirAll(context.Background(), "/docs", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/docs) error = %v", err)
+	}
+	if err := fsys.Symlink(context.Background(), "link2.txt", "/docs/link1.txt"); err != nil {
+		t.Fatalf("Symlink(link1) error = %v", err)
+	}
+
+	writeSearchFile(t, fsys, "/docs/target.txt", "needle chain\n")
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, []string{
+		"/docs/target.txt",
+	})
+
+	if err := fsys.Symlink(context.Background(), "target.txt", "/docs/link2.txt"); err != nil {
+		t.Fatalf("Symlink(link2) error = %v", err)
+	}
+
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, []string{
+		"/docs/link1.txt",
+		"/docs/link2.txt",
+		"/docs/target.txt",
 	})
 }
 
@@ -516,6 +569,30 @@ func (snapshotFixtureFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEnt
 
 func (snapshotFixtureFS) Readlink(context.Context, string) (string, error) {
 	return "", stdfs.ErrInvalid
+}
+
+type cancelAfterContext struct {
+	remaining int
+}
+
+func (c *cancelAfterContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (c *cancelAfterContext) Done() <-chan struct{} {
+	return nil
+}
+
+func (c *cancelAfterContext) Err() error {
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
+
+func (c *cancelAfterContext) Value(any) any {
+	return nil
 }
 
 func (snapshotFixtureFS) Realpath(_ context.Context, name string) (string, error) {

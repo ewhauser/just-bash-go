@@ -167,7 +167,7 @@ func (s *searchableFS) Symlink(ctx context.Context, target, linkName string) err
 	if err := s.refreshTrackedSymlink(ctx, abs); err != nil {
 		return err
 	}
-	return s.syncSearchPath(ctx, abs)
+	return s.syncSearchPathAndAliases(ctx, abs)
 }
 
 func (s *searchableFS) Link(ctx context.Context, oldName, newName string) error {
@@ -180,7 +180,7 @@ func (s *searchableFS) Link(ctx context.Context, oldName, newName string) error 
 	if err := s.refreshTrackedSymlink(ctx, newAbs); err != nil {
 		return err
 	}
-	return s.syncSearchPath(ctx, newAbs)
+	return s.syncSearchPathAndAliases(ctx, newAbs)
 }
 
 func (s *searchableFS) Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error {

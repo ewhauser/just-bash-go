@@ -48,7 +48,10 @@ func newMemorySearchProvider() *memorySearchProvider {
 	}
 }
 
-func (p *memorySearchProvider) Search(_ context.Context, query *SearchQuery) (SearchResult, error) {
+func (p *memorySearchProvider) Search(ctx context.Context, query *SearchQuery) (SearchResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if query == nil {
 		return SearchResult{Status: p.IndexStatus()}, fmt.Errorf("fs: search query is required")
 	}
@@ -66,7 +69,15 @@ func (p *memorySearchProvider) Search(_ context.Context, query *SearchQuery) (Se
 	}
 	keys := make([]string, 0, len(p.records))
 	for name := range p.records {
+		if err := ctx.Err(); err != nil {
+			p.mu.RUnlock()
+			return SearchResult{Status: status}, err
+		}
 		keys = append(keys, name)
+	}
+	if err := ctx.Err(); err != nil {
+		p.mu.RUnlock()
+		return SearchResult{Status: status}, err
 	}
 	slices.Sort(keys)
 
@@ -75,6 +86,10 @@ func (p *memorySearchProvider) Search(_ context.Context, query *SearchQuery) (Se
 		record searchRecord
 	}, 0, len(keys))
 	for _, name := range keys {
+		if err := ctx.Err(); err != nil {
+			p.mu.RUnlock()
+			return SearchResult{Status: status}, err
+		}
 		records = append(records, struct {
 			path   string
 			record searchRecord
@@ -91,6 +106,12 @@ func (p *memorySearchProvider) Search(_ context.Context, query *SearchQuery) (Se
 	hits := make([]SearchHit, 0)
 
 	for _, entry := range records {
+		if err := ctx.Err(); err != nil {
+			return SearchResult{
+				Hits:   hits,
+				Status: status,
+			}, err
+		}
 		if !pathWithinSearchRoot(entry.path, root) {
 			continue
 		}
