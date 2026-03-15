@@ -58,6 +58,28 @@ func TestMalformedFunctionDeclarationDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestBackgroundCommandFailuresDoNotCrash(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	for i := range 256 {
+		result, err := rt.Run(context.Background(), &ExecutionRequest{
+			Script: "X&0&0\n\n",
+		})
+		if err != nil {
+			t.Fatalf("Run(%d) error = %v", i, err)
+		}
+		if result.ExitCode == 0 {
+			t.Fatalf("Run(%d) ExitCode = %d, want non-zero", i, result.ExitCode)
+		}
+		if !strings.Contains(result.Stderr, "command not found") {
+			t.Fatalf("Run(%d) Stderr = %q, want command-not-found message", i, result.Stderr)
+		}
+		if strings.Contains(result.Stderr, "panic:") || strings.Contains(result.Stderr, "fatal error:") {
+			t.Fatalf("Run(%d) Stderr = %q, want sanitized output", i, result.Stderr)
+		}
+	}
+}
+
 func TestCommandPathBelowFileDoesNotEscapeAsInternalError(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
