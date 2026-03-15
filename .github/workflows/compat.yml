@@ -112,6 +112,48 @@ jobs:
           GBASH_WEBSITE_COMPAT_BADGE_PATH="$badge_path" \
           ./scripts/export_website_pages.sh "$RELEASED_SOURCE" "$PAGES_ROOT"
 
+      - name: Check released website bundle
+        id: released_bundle
+        if: always()
+        env:
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$PAGES_ROOT/docs/performance/compatibility/index.html" ] \
+            && [ -f "$PAGES_ROOT/compat/latest/summary.json" ] \
+            && [ -f "$PAGES_ROOT/compat/latest/badge.svg" ] \
+            && [ ! -e "$PAGES_ROOT/compat/latest/index.html" ]; then
+            echo "usable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build current checkout website bundle fallback
+        id: website_build_fallback
+        if: always() && steps.released_bundle.outputs.usable != 'true'
+        continue-on-error: true
+        env:
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+          RESULTS_DIR: .cache/gnu/results/ci-latest
+          GBASH_WEBSITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_URL: https://${{ github.repository_owner }}.github.io${{ steps.pages.outputs.base_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "$RESULTS_DIR/summary.json" ] || [ ! -f "$RESULTS_DIR/badge.svg" ]; then
+            echo "compatibility assets unavailable; skipping fallback website export"
+            exit 1
+          fi
+
+          summary_path="$PWD/$RESULTS_DIR/summary.json"
+          badge_path="$PWD/$RESULTS_DIR/badge.svg"
+
+          pnpm install --frozen-lockfile
+          GBASH_WEBSITE_COMPAT_SUMMARY_PATH="$summary_path" \
+          GBASH_WEBSITE_COMPAT_BADGE_PATH="$badge_path" \
+          ./scripts/export_website_pages.sh "$PWD" "$PAGES_ROOT"
+
       - name: Determine publishable compat bundle
         id: publish-state
         if: always()
@@ -122,6 +164,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           WEBSITE_TAG: ${{ steps.website_tag.outputs.tag }}
           WEBSITE_BUILD_OUTCOME: ${{ steps.website_build.outcome }}
+          RELEASED_BUNDLE_USABLE: ${{ steps.released_bundle.outputs.usable }}
+          FALLBACK_BUILD_OUTCOME: ${{ steps.website_build_fallback.outcome }}
         shell: bash
         run: |
           set -euo pipefail
@@ -132,9 +176,17 @@ jobs:
             echo "publishable=false" >> "$GITHUB_OUTPUT"
           fi
 
+          if [ "$RELEASED_BUNDLE_USABLE" = "true" ]; then
+            echo "site_source=released tag $WEBSITE_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "${FALLBACK_BUILD_OUTCOME:-}" = "success" ] \
+            && [ -f "$PAGES_ROOT/docs/performance/compatibility/index.html" ]; then
+            echo "site_source=current checkout fallback" >> "$GITHUB_OUTPUT"
+          else
+            echo "site_source=unavailable" >> "$GITHUB_OUTPUT"
+          fi
+
           if [ -f "$RESULTS_DIR/summary.json" ] \
             && [ -f "$RESULTS_DIR/badge.svg" ] \
-            && [ "${WEBSITE_BUILD_OUTCOME:-}" = "success" ] \
             && [ "$REF_NAME" = "$DEFAULT_BRANCH" ] \
             && [ -f "$PAGES_ROOT/docs/performance/compatibility/index.html" ] \
             && [ -f "$PAGES_ROOT/compat/latest/summary.json" ] \
@@ -158,13 +210,18 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           WEBSITE_TAG: ${{ steps.website_tag.outputs.tag }}
           WEBSITE_BUILD_OUTCOME: ${{ steps.website_build.outcome }}
+          FALLBACK_BUILD_OUTCOME: ${{ steps.website_build_fallback.outcome }}
+          SITE_SOURCE: ${{ steps.publish-state.outputs.site_source }}
         run: |
           {
             echo "## Compatibility"
             echo
             echo "Harness exit code: \`$COMPAT_EXIT_CODE\`"
             echo
-            if [ -n "$WEBSITE_TAG" ] && [ "$WEBSITE_BUILD_OUTCOME" = "success" ]; then
+            if [ "$SITE_SOURCE" = "current checkout fallback" ]; then
+              echo "Website bundle source: current checkout fallback"
+              echo
+            elif [ -n "$WEBSITE_TAG" ] && [ "$WEBSITE_BUILD_OUTCOME" = "success" ]; then
               echo "Website bundle source: released tag \`$WEBSITE_TAG\`"
               echo
             elif [ -n "$WEBSITE_TAG" ]; then
@@ -177,7 +234,7 @@ jobs:
             if [ "$DEPLOYABLE" = "true" ]; then
               echo "Published latest report: $PAGE_URL"
             elif [ "$PUBLISHABLE" = "true" ]; then
-              if [ "${WEBSITE_BUILD_OUTCOME:-}" != "success" ]; then
+              if [ "${WEBSITE_BUILD_OUTCOME:-}" != "success" ] && [ "${FALLBACK_BUILD_OUTCOME:-}" != "success" ]; then
                 echo "Compatibility assets were generated, but the website export failed so the previous published page remains in place."
               else
                 echo "Report bundle generated, but not deployed because ref \`$REF_NAME\` is not the default branch \`$DEFAULT_BRANCH\`."
