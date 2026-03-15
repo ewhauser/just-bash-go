@@ -89,6 +89,21 @@ const (
 	letHelperCommandAlias = "__l"
 )
 
+var internalHelperCommands = map[string]struct{}{
+	"__jb_activate_new_top":  {},
+	"__jb_cd_resolve":        {},
+	"__jb_dirs_print_path":   {},
+	"__jb_dirs_usage":        {},
+	"__jb_popd_usage":        {},
+	"__jb_pushd_usage":       {},
+	"__jb_stack_parse_index": {},
+	"__jb_stack_remove":      {},
+	"__jb_stack_rotate":      {},
+	letHelperCommandAlias:    {},
+	letHelperCommandName:     {},
+	loopIterCommandName:      {},
+}
+
 func New() *MVdan {
 	return &MVdan{
 		parser: syntax.NewParser(),
@@ -127,10 +142,9 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 			return nil, err
 		}
 		validationProgram = parsed
-	} else {
-		if err := rewriteLetClauses(validationProgram); err != nil {
-			return nil, err
-		}
+	}
+	if err := normalizeExecutionProgram(validationProgram); err != nil {
+		return nil, err
 	}
 	if violation := validateExecutionBudgets(validationProgram, exec.Policy); violation != nil {
 		if exec.Stderr != nil {
@@ -151,8 +165,9 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 			return nil, err
 		}
 		program = parsed
-	} else if program != validationProgram {
-		if err := rewriteLetClauses(program); err != nil {
+	}
+	if program != validationProgram {
+		if err := normalizeExecutionProgram(program); err != nil {
 			return nil, err
 		}
 	}
@@ -691,7 +706,7 @@ func handlerPathError(ctx context.Context, stderr io.Writer, op, name string, er
 }
 
 func lookupCommand(ctx context.Context, exec *Execution, dir string, env expand.Environ, name string) (_ *resolvedCommand, ok bool, err error) {
-	if strings.HasPrefix(name, "__jb_") {
+	if isInternalHelperCommand(name) {
 		cmd, ok := exec.Registry.Lookup(name)
 		if !ok {
 			return nil, false, nil
@@ -1543,12 +1558,8 @@ func prependRuntimePreludeLines(script string) string {
 }
 
 func isInternalHelperCommand(name string) bool {
-	switch name {
-	case loopIterCommandName, letHelperCommandName, letHelperCommandAlias:
-		return true
-	default:
-		return false
-	}
+	_, ok := internalHelperCommands[name]
+	return ok
 }
 
 func execLetHelper(ctx context.Context, args []string) error {

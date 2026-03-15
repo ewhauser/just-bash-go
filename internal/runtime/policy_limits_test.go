@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/policy"
 )
 
@@ -121,5 +122,43 @@ func TestMaxCommandCountDoesNotChargeRuntimePrelude(t *testing.T) {
 	}
 	if got, want := result.Stdout, "/tmp\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestMaxCommandCountCountsUserCommandsWithInternalPrefix(t *testing.T) {
+	const commandName = "__jb_user"
+
+	registry := registryWithCommands(t, commands.DefineCommand(commandName, func(context.Context, *commands.Invocation) error {
+		return nil
+	}))
+
+	rt := newRuntime(t, &Config{
+		Registry: registry,
+		Policy: policy.NewStatic(&policy.Config{
+			AllowedCommands: registry.Names(),
+			ReadRoots:       []string{"/"},
+			WriteRoots:      []string{"/"},
+			Limits: policy.Limits{
+				MaxCommandCount: 1,
+			},
+		}),
+	})
+	session, err := rt.NewSession(context.Background())
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	writeSessionFile(t, session, "/bin/"+commandName, []byte("# helper stub\n"))
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Script: commandName + "\n" + commandName + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if result.ExitCode != 126 {
+		t.Fatalf("ExitCode = %d, want 126", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "too many commands executed") {
+		t.Fatalf("Stderr = %q, want command-count limit message", result.Stderr)
 	}
 }
