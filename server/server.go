@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/ewhauser/gbash"
@@ -183,6 +184,14 @@ func removeStaleUnixSocket(socketPath string) error {
 	if err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("server: path exists and is not a socket: %s", socketPath)
+		}
+		conn, dialErr := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			return fmt.Errorf("server: socket path already has an active listener: %s", socketPath)
+		}
+		if !errors.Is(dialErr, syscall.ECONNREFUSED) && !errors.Is(dialErr, syscall.ENOENT) {
+			return fmt.Errorf("server: check existing socket: %w", dialErr)
 		}
 		if removeErr := os.Remove(socketPath); removeErr != nil {
 			return fmt.Errorf("server: remove stale socket: %w", removeErr)
@@ -394,7 +403,11 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		if err != nil {
 			return appErrorResponse(req.ID, err)
 		}
-		return newRPCResultResponse(req.ID, sessionGetResult{Session: session.summary()})
+		summary, ok := session.liveSummary()
+		if !ok {
+			return appErrorResponse(req.ID, fmt.Errorf("%w: %s", errSessionNotFound, params.SessionID))
+		}
+		return newRPCResultResponse(req.ID, sessionGetResult{Session: summary})
 	case "session.list":
 		if _, err := decodeParams[map[string]any](req.Params); err != nil {
 			return invalidParamsResponse(req.ID, err)

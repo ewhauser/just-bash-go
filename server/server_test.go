@@ -251,6 +251,35 @@ func TestServerSessionTTLExpiry(t *testing.T) {
 	}
 }
 
+func TestListenAndServeUnixRejectsActiveSocket(t *testing.T) {
+	srv := startServer(t, gbserver.Config{
+		Name:       "gbash",
+		Version:    "test",
+		SessionTTL: time.Second,
+	})
+
+	rt, err := gbash.New()
+	if err != nil {
+		t.Fatalf("gbash.New() error = %v", err)
+	}
+
+	err = gbserver.ListenAndServeUnix(t.Context(), srv.socket, gbserver.Config{
+		Runtime:    rt,
+		Name:       "gbash",
+		Version:    "test",
+		SessionTTL: time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "active listener") {
+		t.Fatalf("ListenAndServeUnix() error = %v, want active listener failure", err)
+	}
+
+	client := dialClient(t, srv.socket)
+	defer client.Close()
+
+	resp := client.call("system.hello", map[string]any{"client_name": "test"})
+	mustOK(t, &resp)
+}
+
 func startServer(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serverHandle {
 	t.Helper()
 

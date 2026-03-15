@@ -96,8 +96,9 @@ type serverSession struct {
 	updatedAt time.Time
 	idleSince time.Time
 
-	mu   sync.Mutex
-	busy bool
+	mu        sync.Mutex
+	busy      bool
+	destroyed bool
 }
 
 func (s *serverState) createSession() (*serverSession, error) {
@@ -151,7 +152,9 @@ func (s *serverState) listSessions() []sessionSummary {
 
 	out := make([]sessionSummary, 0, len(sessions))
 	for _, session := range sessions {
-		out = append(out, session.summary())
+		if summary, ok := session.liveSummary(); ok {
+			out = append(out, summary)
+		}
 	}
 	slices.SortFunc(out, func(a, b sessionSummary) int {
 		return strings.Compare(a.SessionID, b.SessionID)
@@ -171,9 +174,21 @@ func (s *serverState) destroySession(id string) (*serverSession, error) {
 		s.sessionsMu.Unlock()
 		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
 	}
-	if session.isBusy() {
+	session.mu.Lock()
+	switch {
+	case session.destroyed:
+		session.mu.Unlock()
+		s.sessionsMu.Unlock()
+		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
+	case session.busy:
+		session.mu.Unlock()
 		s.sessionsMu.Unlock()
 		return nil, fmt.Errorf("%w: %s", errSessionBusy, id)
+	default:
+		session.destroyed = true
+		session.updatedAt = time.Now().UTC()
+		session.idleSince = time.Time{}
+		session.mu.Unlock()
 	}
 	delete(s.sessions, id)
 	s.sessionsMu.Unlock()
@@ -197,6 +212,15 @@ func (s *serverSession) summary() sessionSummary {
 	return s.summaryLocked()
 }
 
+func (s *serverSession) liveSummary() (sessionSummary, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.destroyed {
+		return sessionSummary{}, false
+	}
+	return s.summaryLocked(), true
+}
+
 func (s *serverSession) summaryLocked() sessionSummary {
 	summary := sessionSummary{
 		SessionID: s.id,
@@ -214,16 +238,10 @@ func (s *serverSession) summaryLocked() sessionSummary {
 	return summary
 }
 
-func (s *serverSession) isBusy() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.busy
-}
-
 func (s *serverSession) expired(now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.busy || s.idleSince.IsZero() || s.server.cfg.SessionTTL <= 0 {
+	if s.destroyed || s.busy || s.idleSince.IsZero() || s.server.cfg.SessionTTL <= 0 {
 		return false
 	}
 	return !now.Before(s.idleSince.Add(s.server.cfg.SessionTTL))
@@ -235,7 +253,11 @@ func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*s
 	}
 
 	s.mu.Lock()
-	if s.busy {
+	switch {
+	case s.destroyed:
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: %s", errSessionNotFound, s.id)
+	case s.busy:
 		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %s", errSessionBusy, s.id)
 	}
