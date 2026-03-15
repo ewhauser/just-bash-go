@@ -182,6 +182,23 @@ func TestTailSupportsFromLineSyntax(t *testing.T) {
 	}
 }
 
+func TestTailSupportsFromByteSyntax(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'abcdef\\n' > /tmp/in.txt\n tail -c +3 /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "cdef\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestTailWorksInPipeline(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
