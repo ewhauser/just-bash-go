@@ -89,6 +89,21 @@ const (
 	letHelperCommandAlias = "__l"
 )
 
+var internalHelperCommands = map[string]struct{}{
+	"__jb_activate_new_top":  {},
+	"__jb_cd_resolve":        {},
+	"__jb_dirs_print_path":   {},
+	"__jb_dirs_usage":        {},
+	"__jb_popd_usage":        {},
+	"__jb_pushd_usage":       {},
+	"__jb_stack_parse_index": {},
+	"__jb_stack_remove":      {},
+	"__jb_stack_rotate":      {},
+	letHelperCommandAlias:    {},
+	letHelperCommandName:     {},
+	loopIterCommandName:      {},
+}
+
 func New() *MVdan {
 	return &MVdan{
 		parser: syntax.NewParser(),
@@ -691,7 +706,7 @@ func handlerPathError(ctx context.Context, stderr io.Writer, op, name string, er
 }
 
 func lookupCommand(ctx context.Context, exec *Execution, dir string, env expand.Environ, name string) (_ *resolvedCommand, ok bool, err error) {
-	if strings.HasPrefix(name, "__jb_") {
+	if isInternalHelperCommand(name) {
 		cmd, ok := exec.Registry.Lookup(name)
 		if !ok {
 			return nil, false, nil
@@ -1543,7 +1558,8 @@ func prependRuntimePreludeLines(script string) string {
 }
 
 func isInternalHelperCommand(name string) bool {
-	return strings.HasPrefix(name, "__jb_") || name == letHelperCommandAlias
+	_, ok := internalHelperCommands[name]
+	return ok
 }
 
 func execLetHelper(ctx context.Context, args []string) error {

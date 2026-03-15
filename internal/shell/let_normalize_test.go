@@ -83,3 +83,21 @@ func TestNormalizeLetCommandsHandlesNestedCase(t *testing.T) {
 		t.Fatalf("normalizeLetCommands() =\n  %q\nwant unchanged script", got)
 	}
 }
+
+func TestNormalizeLetCommandsTreatsCaseKeywordAsLiteralInsidePatterns(t *testing.T) {
+	t.Parallel()
+
+	script := "" +
+		"case \"$x\" in\n" +
+		"  a|case) let a+=1 ;;\n" +
+		"esac\n"
+
+	want := "" +
+		"case \"$x\" in\n" +
+		"  a|case) " + letHelperCommandAlias + " a+=1 ;;\n" +
+		"esac\n"
+
+	if got := normalizeLetCommands(script); got != want {
+		t.Fatalf("normalizeLetCommands() =\n  %q\nwant\n  %q", got, want)
+	}
+}

@@ -207,6 +207,8 @@ func (n *letNormalizer) copyWord() {
 		}
 		if n.wantCommandWord {
 			switch {
+			case n.inCasePattern:
+				n.wantCommandWord = false
 			case raw == "case":
 				n.sawCase = true
 				n.wantCommandWord = false
