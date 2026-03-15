@@ -58,6 +58,10 @@ func (n *letNormalizer) run() string {
 			n.wantCommandWord = true
 			n.expectRedirTarget = false
 		case '(':
+			if strings.HasPrefix(n.src[n.i:], "((") {
+				n.copyArithmeticCommand()
+				continue
+			}
 			n.out.WriteByte(c)
 			n.i++
 			n.wantCommandWord = true
@@ -187,6 +191,15 @@ func (n *letNormalizer) copyWord() {
 	n.i = end
 }
 
+func (n *letNormalizer) copyArithmeticCommand() {
+	start := n.i
+	end := scanArithmeticCommand(n.src, start)
+	n.out.WriteString(n.src[start:end])
+	n.i = end
+	n.wantCommandWord = false
+	n.expectRedirTarget = false
+}
+
 func (n *letNormalizer) consumeHeredocBodies() {
 	for len(n.pendingHeredocs) > 0 && n.i < len(n.src) {
 		lineStart := n.i
@@ -237,7 +250,22 @@ func keywordStartsCommand(word string) bool {
 }
 
 func startsFunctionDeclaration(src string, start int) bool {
-	return start < len(src) && src[start] == '('
+	i := start
+	for i < len(src) {
+		switch src[i] {
+		case ' ', '\t', '\r':
+			i++
+		case '\\':
+			if i+1 < len(src) && src[i+1] == '\n' {
+				i += 2
+			} else {
+				return false
+			}
+		default:
+			return src[i] == '('
+		}
+	}
+	return false
 }
 
 func isAssignmentWord(word string) bool {
@@ -426,6 +454,50 @@ func skipArithmeticExpansion(src string, start int) int {
 			i = skipDoubleQuoted(src, i)
 		case '`':
 			i = skipBackquoted(src, i)
+		case '(':
+			depth++
+			i++
+		case ')':
+			depth--
+			i++
+			if depth == 0 && i < len(src) && src[i] == ')' {
+				return i + 1
+			}
+		default:
+			i++
+		}
+	}
+	return len(src)
+}
+
+func scanArithmeticCommand(src string, start int) int {
+	depth := 1
+	i := start + 2
+	for i < len(src) {
+		switch src[i] {
+		case '\\':
+			if i+1 < len(src) {
+				i += 2
+			} else {
+				i++
+			}
+		case '\'':
+			i = skipSingleQuoted(src, i)
+		case '"':
+			i = skipDoubleQuoted(src, i)
+		case '`':
+			i = skipBackquoted(src, i)
+		case '$':
+			switch {
+			case strings.HasPrefix(src[i:], "$(("):
+				i = skipArithmeticExpansion(src, i)
+			case strings.HasPrefix(src[i:], "$("):
+				i = skipCommandSubstitution(src, i)
+			case strings.HasPrefix(src[i:], "${"):
+				i = skipBracedExpansion(src, i)
+			default:
+				i++
+			}
 		case '(':
 			depth++
 			i++

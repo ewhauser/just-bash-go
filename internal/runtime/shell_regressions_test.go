@@ -96,3 +96,15 @@ func TestLetRegressionSupportsExpandedAssignmentTargetExpression(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestArithmeticRegressionDoesNotRewriteLetIdentifiersInsideArithmeticCommands(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "let=5; if ((let<3)); then echo bad; else echo ok; fi\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "ok\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
