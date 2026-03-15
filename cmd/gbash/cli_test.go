@@ -594,6 +594,118 @@ func TestRunCLIHostUtilityPassesStdin(t *testing.T) {
 	}
 }
 
+func TestRunCLIHostUtilityCatRejectsAppendToSelf(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "out"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(out) error = %v", err)
+	}
+
+	stdout, err := os.OpenFile(filepath.Join(tmp, "out"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(out append) error = %v", err)
+	}
+	defer func() { _ = stdout.Close() }()
+
+	var stderr strings.Builder
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "cat", []string{"out"}, strings.NewReader(""), stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 1 {
+		t.Fatalf("exitCode = %d, want 1; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stderr.String(), "cat: out: input file is output file\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "out"))
+	if err != nil {
+		t.Fatalf("ReadFile(out) error = %v", err)
+	}
+	if got, want := string(data), "x\n"; got != want {
+		t.Fatalf("out = %q, want %q", got, want)
+	}
+}
+
+func TestRunCLIHostUtilityCatCanCopyThroughSharedReadWriteTarget(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "fxy1"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(fxy1) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "fy"), []byte("y\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(fy) error = %v", err)
+	}
+
+	stdin, err := os.Open(filepath.Join(tmp, "fxy1"))
+	if err != nil {
+		t.Fatalf("Open(fxy1) error = %v", err)
+	}
+	defer func() { _ = stdin.Close() }()
+
+	stdout, err := os.OpenFile(filepath.Join(tmp, "fxy1"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(fxy1 readwrite) error = %v", err)
+	}
+	defer func() { _ = stdout.Close() }()
+
+	var stderr strings.Builder
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "cat", []string{"-", "fy"}, stdin, stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "fxy1"))
+	if err != nil {
+		t.Fatalf("ReadFile(fxy1) error = %v", err)
+	}
+	if got, want := string(data), "x\ny\n"; got != want {
+		t.Fatalf("fxy1 = %q, want %q", got, want)
+	}
+}
+
+func TestRunCLIHostUtilityPassesGBASHUmaskToRuntime(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	target := filepath.Join(tmp, "file.txt")
+	if err := os.WriteFile(target, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file.txt) error = %v", err)
+	}
+	t.Setenv("GBASH_UMASK", "0005")
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "chmod", []string{"a=r,=x", "file.txt"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("Stat(file.txt) error = %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o110); got != want {
+		t.Fatalf("mode = %#o, want %#o", got, want)
+	}
+}
+
 func TestRunCLIHostUtilityUnknownCommandReturns127(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
@@ -1636,7 +1748,15 @@ func runCLIHostUtility(t *testing.T, ctx context.Context, root, utility string, 
 		t.Fatalf("currentSandboxCwd(%q) error = %v", root, err)
 	}
 
-	args := []string{"--readwrite-root", root, "--cwd", sandboxCwd, "-c", `exec "$@"`, "_", utility}
+	args := []string{
+		"--readwrite-root", root,
+		"--cwd", sandboxCwd,
+		"-c", `GBASH_UMASK=$1; export GBASH_UMASK; POSIXLY_CORRECT=$2; if [ -n "$POSIXLY_CORRECT" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; shift 2; exec "$@"`,
+		"_",
+		os.Getenv("GBASH_UMASK"),
+		os.Getenv("POSIXLY_CORRECT"),
+		utility,
+	}
 	args = append(args, utilityArgs...)
 	return runCLI(ctx, "gbash", args, stdin, stdout, stderr, stdinTTY)
 }
