@@ -13,6 +13,7 @@ func FuzzHTTPClientPolicy(f *testing.F) {
 	f.Add([]byte{0, 0, 0, 0})
 	f.Add([]byte{1, 1, 1, 1})
 	f.Add([]byte{2, 2, 1, 0})
+	f.Add([]byte("98"))
 
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		cursor := newNetworkFuzzCursor(raw)
@@ -63,22 +64,31 @@ func FuzzHTTPClientPolicy(f *testing.F) {
 			FollowRedirects: follow,
 		})
 
-		switch {
-		case requestURL == "https://evil.example.net/data", requestURL == "http://localhost/admin":
-			if err == nil || !IsDenied(err) {
-				t.Fatalf("Do(%q) error = %v, want denied", requestURL, err)
-			}
-		case follow && statusCode == http.StatusFound && (redirectTarget == "https://evil.example.net/data" || redirectTarget == "http://localhost/admin"):
-			if err == nil || !IsDenied(err) {
-				t.Fatalf("Do(%q) unexpectedly allowed redirect to %q", requestURL, redirectTarget)
-			}
-		default:
+		expectDenied := false
+		if err := client.checkURLAllowed(context.Background(), requestURL); err != nil {
+			expectDenied = true
+		} else if follow && statusCode == http.StatusFound && redirectTarget != "" {
+			nextURL, err := resolveRedirectURL(requestURL, redirectTarget)
 			if err != nil {
-				t.Fatalf("Do(%q) error = %v", requestURL, err)
+				t.Fatalf("resolveRedirectURL(%q, %q) error = %v", requestURL, redirectTarget, err)
 			}
-			if resp == nil {
-				t.Fatalf("Do(%q) returned nil response", requestURL)
+			if err := client.checkURLAllowed(context.Background(), nextURL); err != nil {
+				expectDenied = true
 			}
+		}
+
+		if expectDenied {
+			if err == nil || !IsDenied(err) {
+				t.Fatalf("Do(%q) error = %v, want denied (redirect=%q follow=%v)", requestURL, err, redirectTarget, follow)
+			}
+			return
+		}
+
+		if err != nil {
+			t.Fatalf("Do(%q) error = %v", requestURL, err)
+		}
+		if resp == nil {
+			t.Fatalf("Do(%q) returned nil response", requestURL)
 		}
 	})
 }

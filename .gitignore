@@ -40,6 +40,10 @@ website/out/
 !contrib/jq/testdata/fuzz/
 !contrib/jq/testdata/fuzz/FuzzJQCommands/
 !contrib/jq/testdata/fuzz/FuzzJQCommands/09acab89b2271fbf
+!network/testdata/
+!network/testdata/fuzz/
+!network/testdata/fuzz/FuzzHTTPClientPolicy/
+!network/testdata/fuzz/FuzzHTTPClientPolicy/0a263ae04f513c1c
 
 /gbash-gnu
 CONTINUITY.md
