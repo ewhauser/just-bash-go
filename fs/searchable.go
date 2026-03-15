@@ -47,14 +47,18 @@ func NewSearchableFileSystem(ctx context.Context, fsys FileSystem, provider Sear
 		}
 	}
 
-	return &searchableFS{
+	searchable := &searchableFS{
 		inner:                fsys,
 		search:               provider,
 		hardLinkGroupByPath:  make(map[string]uint64),
 		hardLinkGroups:       make(map[uint64]map[string]struct{}),
 		symlinkTargetByPath:  make(map[string]string),
 		symlinkPathsByTarget: make(map[string]map[string]struct{}),
-	}, nil
+	}
+	if err := searchable.bootstrapSearchTracking(ctx); err != nil {
+		return nil, err
+	}
+	return searchable, nil
 }
 
 // NewSearchableFactory wraps each filesystem created by base with the
@@ -360,6 +364,38 @@ func readAllSearchFile(ctx context.Context, fsys FileSystem, name string) ([]byt
 	}
 	defer func() { _ = file.Close() }()
 	return io.ReadAll(file)
+}
+
+func (s *searchableFS) bootstrapSearchTracking(ctx context.Context) error {
+	return s.walkSearchTracking(ctx, "/")
+}
+
+func (s *searchableFS) walkSearchTracking(ctx context.Context, current string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	linfo, err := s.inner.Lstat(ctx, current)
+	if err != nil {
+		return err
+	}
+	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		return s.refreshTrackedSymlink(ctx, current)
+	}
+	if !linfo.IsDir() {
+		return nil
+	}
+
+	entries, err := s.inner.ReadDir(ctx, current)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := s.walkSearchTracking(ctx, joinChildPath(current, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *searchableFS) syncSearchPath(ctx context.Context, name string) error {
