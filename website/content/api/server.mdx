@@ -1,0 +1,547 @@
+# Server
+
+The `server` package exposes the shared gbash daemon surface used by both `gbash` and `gbash-extras` when they run in `--server` mode.
+
+This page documents the v1 wire protocol as implemented today so external clients can talk to the daemon directly.
+
+## Public API
+
+```go
+type Config struct {
+    Runtime    *gbash.Runtime
+    Name       string
+    Version    string
+    SessionTTL time.Duration
+}
+
+func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) error
+func Serve(ctx context.Context, ln net.Listener, cfg Config) error
+```
+
+Use `ListenAndServeUnix` when you want the package to create and manage the Unix domain socket path for you. Use `Serve` when your host already owns the listener.
+
+## Starting the Server
+
+The shipped CLIs expose the same server:
+
+```bash
+gbash --server --socket /tmp/gbash.sock --session-ttl 30m
+```
+
+```bash
+gbash-extras --server --socket /tmp/gbash-extras.sock
+```
+
+Filesystem layout is fixed at server startup through the normal runtime or CLI options such as `--root`, `--readwrite-root`, and `--cwd`. The protocol does not provide filesystem RPC in v1.
+
+## Transport
+
+- v1 transport is a Unix domain socket
+- protocol is JSON-RPC 2.0
+- messages are a stream of JSON values on the socket
+- requests and responses share the same connection
+- there are no async server-pushed events in v1
+- clients can open more than one socket if they want concurrent outstanding requests
+
+The current implementation uses Go's `json.Encoder` and `json.Decoder`, so newline-delimited JSON works in practice, but clients should treat the socket as a stream of JSON objects rather than depending on whitespace details.
+
+## Session Model
+
+`session_id` identifies one persistent `gbash.Session`.
+
+Important semantics:
+
+- filesystem state persists for the life of the session
+- `session.exec` runs one non-interactive `Session.Exec` call inside that session
+- a session allows only one active `session.exec` at a time
+- separate sessions can run concurrently
+- shell-local state does not persist across separate `session.exec` calls unless the client carries it forward explicitly using `final_env`
+
+## JSON-RPC Envelope
+
+Every request is a JSON-RPC 2.0 request object:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "method": "session.create",
+  "params": {}
+}
+```
+
+Success response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "result": {
+    "session": {
+      "session_id": "sess-000001",
+      "state": "idle",
+      "created_at": "2026-03-15T20:12:34.123456Z",
+      "updated_at": "2026-03-15T20:12:34.123456Z",
+      "expires_at": "2026-03-15T20:42:34.123456Z"
+    }
+  }
+}
+```
+
+Error response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-1",
+  "error": {
+    "code": -32010,
+    "message": "session not found",
+    "data": {
+      "code": "SESSION_NOT_FOUND",
+      "details": "session not found: sess-999999"
+    }
+  }
+}
+```
+
+General rules:
+
+- `jsonrpc` must be `"2.0"`
+- `id` must be present and must be a JSON string, number, or `null`
+- batch requests are not supported in v1
+- request notifications are not supported in v1
+- method parameters are object-shaped `params` payloads
+- v1 uses JSON-RPC standard error codes for protocol errors and `error.data.code` for gbash-specific error names
+
+## Common Result Types
+
+### Session Summary
+
+Used by `session.create`, `session.get`, `session.destroy`, and nested inside `session.exec`.
+
+```json
+{
+  "session_id": "sess-000001",
+  "state": "idle",
+  "created_at": "2026-03-15T20:12:34.123456Z",
+  "updated_at": "2026-03-15T20:12:34.123456Z",
+  "expires_at": "2026-03-15T20:42:34.123456Z"
+}
+```
+
+Fields:
+
+- `session_id`: stable id for the persistent sandbox session
+- `state`: `"idle"` or `"running"`
+- `created_at`, `updated_at`, `expires_at`: UTC timestamps in RFC3339Nano format
+- `expires_at`: omitted while the session is running
+
+### `session.exec` Result
+
+```json
+{
+  "session_id": "sess-000001",
+  "exit_code": 0,
+  "stdout": "hello\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "final_env": {
+    "PATH": "/bin",
+    "PWD": "/tmp"
+  },
+  "shell_exited": false,
+  "control_stderr": "",
+  "started_at": "2026-03-15T20:13:00.000000Z",
+  "finished_at": "2026-03-15T20:13:00.010000Z",
+  "duration_ms": 10,
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:13:00.010000Z",
+    "expires_at": "2026-03-15T20:43:00.010000Z"
+  }
+}
+```
+
+Fields:
+
+- `exit_code`: shell exit status
+- `stdout`, `stderr`: captured execution output
+- `stdout_truncated`, `stderr_truncated`: true when output limits truncated the captured result
+- `final_env`: final shell environment snapshot from the execution
+- `shell_exited`: whether the shell exited explicitly
+- `control_stderr`: runtime-generated diagnostics that are not normal script stderr
+- `started_at`, `finished_at`, `duration_ms`: execution timing metadata
+- `session`: updated session summary after the execution completes
+
+## Methods
+
+### `system.hello`
+
+Recommended first request after connecting.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "system.hello",
+  "params": {
+    "client_name": "my-client",
+    "client_version": "0.1.0"
+  }
+}
+```
+
+The `params` payload is optional and currently ignored by the server.
+
+Success result:
+
+```json
+{
+  "server_name": "gbash",
+  "server_version": "dev",
+  "protocol": "2.0",
+  "capabilities": {
+    "binary": "gbash",
+    "transport": "unix",
+    "persistent_sessions": true,
+    "session_exec": true,
+    "filesystem_rpc": false,
+    "interactive_shell": false
+  }
+}
+```
+
+Current capability values:
+
+- `binary`: binary identity, for example `gbash` or `gbash-extras`
+- `transport`: always `unix`
+- `persistent_sessions`: always `true`
+- `session_exec`: always `true`
+- `filesystem_rpc`: always `false`
+- `interactive_shell`: always `false`
+
+The server also accepts `hello` as a compatibility alias for `system.hello`.
+
+### `system.ping`
+
+Health check request.
+
+Request payload is optional and ignored.
+
+Success result:
+
+```json
+{
+  "pong": true
+}
+```
+
+The server also accepts `ping` as a compatibility alias for `system.ping`.
+
+### `session.create`
+
+Creates a new persistent sandbox session.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "2",
+  "method": "session.create",
+  "params": {}
+}
+```
+
+Success result:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:12:34.123456Z",
+    "expires_at": "2026-03-15T20:42:34.123456Z"
+  }
+}
+```
+
+`params` may be omitted or set to `{}`.
+
+### `session.get`
+
+Returns the current state of one session.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "3",
+  "method": "session.get",
+  "params": {
+    "session_id": "sess-000001"
+  }
+}
+```
+
+Success result:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:12:34.123456Z",
+    "expires_at": "2026-03-15T20:42:34.123456Z"
+  }
+}
+```
+
+Error conditions:
+
+- `SESSION_NOT_FOUND`
+- `INVALID_ARGUMENT` if `session_id` is missing or empty
+
+### `session.list`
+
+Lists all non-expired sessions.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "4",
+  "method": "session.list",
+  "params": {}
+}
+```
+
+Success result:
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess-000001",
+      "state": "idle",
+      "created_at": "2026-03-15T20:12:34.123456Z",
+      "updated_at": "2026-03-15T20:12:34.123456Z",
+      "expires_at": "2026-03-15T20:42:34.123456Z"
+    }
+  ]
+}
+```
+
+`params` may be omitted or set to `{}`.
+
+### `session.destroy`
+
+Destroys an idle session.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "5",
+  "method": "session.destroy",
+  "params": {
+    "session_id": "sess-000001"
+  }
+}
+```
+
+Success result:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:12:34.123456Z",
+    "expires_at": "2026-03-15T20:42:34.123456Z"
+  }
+}
+```
+
+Error conditions:
+
+- `SESSION_NOT_FOUND`
+- `SESSION_BUSY`
+- `INVALID_ARGUMENT` if `session_id` is missing or empty
+
+### `session.exec`
+
+Runs one non-interactive shell execution inside an existing session and returns the full result in one JSON-RPC response.
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "6",
+  "method": "session.exec",
+  "params": {
+    "session_id": "sess-000001",
+    "name": "build-step",
+    "script": "cd /tmp && printf 'hello\\n'",
+    "args": [],
+    "startup_options": [],
+    "env": {
+      "MODE": "debug"
+    },
+    "work_dir": "/tmp",
+    "replace_env": false,
+    "timeout_ms": 30000
+  }
+}
+```
+
+Parameters:
+
+- `session_id`: required session id
+- `name`: optional execution name
+- `script`: shell script to execute
+- `args`: optional shell positional arguments
+- `startup_options`: optional shell startup options
+- `env`: optional environment overlay
+- `work_dir`: optional working directory override
+- `replace_env`: whether `env` replaces the base environment instead of overlaying it
+- `timeout_ms`: optional timeout in milliseconds; omitted or `0` means no timeout
+
+Success result:
+
+```json
+{
+  "session_id": "sess-000001",
+  "exit_code": 0,
+  "stdout": "hello\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "final_env": {
+    "MODE": "debug",
+    "PWD": "/tmp"
+  },
+  "shell_exited": false,
+  "control_stderr": "",
+  "started_at": "2026-03-15T20:13:00.000000Z",
+  "finished_at": "2026-03-15T20:13:00.010000Z",
+  "duration_ms": 10,
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:13:00.010000Z",
+    "expires_at": "2026-03-15T20:43:00.010000Z"
+  }
+}
+```
+
+Error conditions:
+
+- `SESSION_NOT_FOUND`
+- `SESSION_BUSY`
+- `INVALID_ARGUMENT` if parameters are malformed
+- `INTERNAL` for unexpected runtime failures
+
+Operational note:
+
+- the server does not stream stdout or stderr incrementally in v1
+- if you need concurrency, open another socket and use another session
+- if you want shell-local state continuity between requests, feed `final_env` into the next `session.exec.env`
+
+## Error Model
+
+The server uses standard JSON-RPC error codes for protocol-level failures and gbash-specific string codes in `error.data.code`.
+
+Common protocol errors:
+
+| JSON-RPC code | Meaning |
+|------|------|
+| `-32700` | Parse error |
+| `-32600` | Invalid request |
+| `-32601` | Method not found |
+| `-32602` | Invalid params |
+| `-32603` | Internal error |
+
+Current gbash-specific `error.data.code` values:
+
+| Data code | Meaning |
+|------|------|
+| `INVALID_REQUEST` | Invalid JSON-RPC envelope or unsupported batch request |
+| `INVALID_ARGUMENT` | Invalid or missing method parameters |
+| `SESSION_NOT_FOUND` | No such session |
+| `SESSION_BUSY` | The target session already has a running `session.exec` |
+| `INTERNAL` | Unexpected server-side failure |
+
+Example invalid params response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "6",
+  "error": {
+    "code": -32602,
+    "message": "invalid params",
+    "data": {
+      "code": "INVALID_ARGUMENT",
+      "details": "invalid argument: session_id must not be empty"
+    }
+  }
+}
+```
+
+## Session Expiry
+
+`SessionTTL` is configured at server startup.
+
+Expiry behavior:
+
+- a newly created but unused session expires after `SessionTTL`
+- a session becomes idle again after `session.exec` completes
+- idle sessions expire after `SessionTTL`
+- running sessions do not expire
+- expired sessions disappear from `session.list`
+- later `session.get`, `session.destroy`, or `session.exec` calls against an expired session fail with `SESSION_NOT_FOUND`
+
+## Full Example
+
+Client requests:
+
+```json
+{"jsonrpc":"2.0","id":"1","method":"system.hello","params":{"client_name":"demo"}}
+{"jsonrpc":"2.0","id":"2","method":"session.create","params":{}}
+{"jsonrpc":"2.0","id":"3","method":"session.exec","params":{"session_id":"sess-000001","script":"printf 'hi\\n'"}}
+```
+
+Server responses:
+
+```json
+{"jsonrpc":"2.0","id":"1","result":{"server_name":"gbash","server_version":"dev","protocol":"2.0","capabilities":{"binary":"gbash","transport":"unix","persistent_sessions":true,"session_exec":true,"filesystem_rpc":false,"interactive_shell":false}}}
+{"jsonrpc":"2.0","id":"2","result":{"session":{"session_id":"sess-000001","state":"idle","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:12:34.123456Z","expires_at":"2026-03-15T20:42:34.123456Z"}}}
+{"jsonrpc":"2.0","id":"3","result":{"session_id":"sess-000001","exit_code":0,"stdout":"hi\n","stderr":"","stdout_truncated":false,"stderr_truncated":false,"final_env":{"PATH":"/bin"},"shell_exited":false,"started_at":"2026-03-15T20:13:00.000000Z","finished_at":"2026-03-15T20:13:00.001000Z","duration_ms":1,"session":{"session_id":"sess-000001","state":"idle","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:13:00.001000Z","expires_at":"2026-03-15T20:43:00.001000Z"}}}
+```
+
+## Current Limits
+
+The v1 server intentionally does not provide:
+
+- interactive shell streaming over the protocol
+- attach/detach or replay buffers
+- filesystem RPC
+- PTY resize or host TTY emulation
+- signal forwarding or job control
+
+If you are embedding gbash directly and do not need a wire protocol, use the normal in-process `Runtime` and `Session` APIs instead.

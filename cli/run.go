@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/internal/builtins"
+	gbserver "github.com/ewhauser/gbash/server"
 	"golang.org/x/term"
 )
 
@@ -59,6 +61,17 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		_, _ = io.WriteString(stdout, versionText(cfg))
 		return 0, nil
 	}
+	if runtimeOpts.server {
+		if runtimeOpts.json {
+			return writeCLIJSONError(stdout, cfg.Name, 2, fmt.Errorf("--server and --json are mutually exclusive"))
+		}
+		if parsed.Source != builtins.BashSourceStdin || parsed.Interactive {
+			return 2, fmt.Errorf("--server cannot be combined with script execution or interactive shell flags")
+		}
+		if strings.TrimSpace(runtimeOpts.socket) == "" {
+			return 2, fmt.Errorf("--socket is required when --server is set")
+		}
+	}
 	if runtimeOpts.json && parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
 		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(2, nil, formatCLIError(cfg.Name, fmt.Errorf("--json is only supported for non-interactive executions")))); jsonErr != nil {
 			return 1, jsonErr
@@ -66,7 +79,7 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		return 2, nil
 	}
 
-	rt, err := newRuntime(cfg, runtimeOpts)
+	rt, err := newRuntime(cfg, &runtimeOpts)
 	if err != nil {
 		if runtimeOpts.json {
 			if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(1, nil, formatCLIError(cfg.Name, fmt.Errorf("init runtime: %w", err)))); jsonErr != nil {
@@ -75,6 +88,19 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 			return 1, nil
 		}
 		return 1, fmt.Errorf("init runtime: %w", err)
+	}
+	if runtimeOpts.server {
+		meta := currentBuildInfo(cfg.Build)
+		err = gbserver.ListenAndServeUnix(ctx, runtimeOpts.socket, gbserver.Config{
+			Runtime:    rt,
+			Name:       cfg.Name,
+			Version:    meta.Version,
+			SessionTTL: runtimeOpts.sessionTTL,
+		})
+		if err != nil {
+			return 1, fmt.Errorf("server error: %w", err)
+		}
+		return 0, nil
 	}
 
 	if parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {

@@ -16,6 +16,7 @@ gbash exposes a Go library for embedding a deterministic bash runtime in your ap
 ```text
 github.com/ewhauser/gbash           Core runtime, sessions, and option helpers
 github.com/ewhauser/gbash/commands   Command interface, registry, and invocation types
+github.com/ewhauser/gbash/server     Shared Unix-socket JSON-RPC server mode for persistent sessions
 github.com/ewhauser/gbash/fs         Filesystem abstractions (memory, host overlay, read-write)
 github.com/ewhauser/gbash/network    HTTP client and allowlist configuration for curl
 github.com/ewhauser/gbash/policy     Path access checks and execution limits
@@ -62,6 +63,7 @@ hello world
 ## Next Steps
 
 - [Runtime](/docs/api/runtime) -- creating and configuring runtimes
+- [Server](/docs/api/server) -- hosting persistent sessions over a Unix-socket JSON-RPC endpoint
 - [Tracing and Logging](/docs/api/tracing-and-logging) -- structured traces and lifecycle log callbacks
 - [Sessions](/docs/api/sessions) -- persistent sandbox state across executions
 - [Custom Commands](/docs/api/custom-commands) -- extending the command registry

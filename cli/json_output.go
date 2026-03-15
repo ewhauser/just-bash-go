@@ -126,6 +126,13 @@ func formatCLIError(name string, err error) string {
 	return fmt.Sprintf("%s: %v", name, err)
 }
 
+func writeCLIJSONError(stdout io.Writer, name string, exitCode int, err error) (int, error) {
+	if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(exitCode, nil, formatCLIError(name, err))); jsonErr != nil {
+		return 1, jsonErr
+	}
+	return exitCode, nil
+}
+
 func writerOrDiscard(w io.Writer) io.Writer {
 	if w == nil {
 		return io.Discard

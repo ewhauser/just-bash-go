@@ -111,6 +111,27 @@ func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
 	}
 }
 
+func TestRunCLIHelpRendersServerFlags(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--help"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+	for _, want := range []string{"CLI server options:", "--server", "--socket PATH", "--session-ttl DURATION"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want help to contain %q", stdout.String(), want)
+		}
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
@@ -192,6 +213,58 @@ func TestRunCLIJSONOutputRejectsInteractiveShell(t *testing.T) {
 	payload := mustParseCLIJSONResult(t, stdout.String())
 	if !strings.Contains(payload.Stderr, "only supported for non-interactive executions") {
 		t.Fatalf("stderr = %q, want non-interactive rejection", payload.Stderr)
+	}
+}
+
+func TestRunCLIServerRequiresSocket(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--server"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want socket requirement")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "--socket is required") {
+		t.Fatalf("error = %v, want socket requirement", err)
+	}
+}
+
+func TestRunCLIServerRejectsScriptExecutionFlags(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--server", "--socket", filepath.Join(t.TempDir(), "gbash.sock"), "-c", "echo hi"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want server/script rejection")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("error = %v, want server/script rejection", err)
+	}
+}
+
+func TestRunCLIServerRejectsJSONMode(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--server", "--socket", filepath.Join(t.TempDir(), "gbash.sock"), "--json"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	payload := mustParseCLIJSONResult(t, stdout.String())
+	if !strings.Contains(payload.Stderr, "--server and --json are mutually exclusive") {
+		t.Fatalf("stderr = %q, want server/json rejection", payload.Stderr)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
 	}
 }
 
