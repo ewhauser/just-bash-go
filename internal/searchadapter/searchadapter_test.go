@@ -394,6 +394,12 @@ func TestRegexpPrefilterLiterals(t *testing.T) {
 			wantUsable: true,
 		},
 		{
+			name:       "nested-alternation-preserves-branch-union",
+			pattern:    "(?:abcd|wxyz)e|zzz",
+			want:       []string{"abcd", "wxyz", "zzz"},
+			wantUsable: true,
+		},
+		{
 			name:       "optional-pattern-falls-back",
 			pattern:    "a*",
 			want:       nil,

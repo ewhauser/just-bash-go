@@ -410,7 +410,7 @@ func mandatoryLiteralSet(re *syntax.Regexp) []string {
 			if len(candidate) == 0 {
 				return nil
 			}
-			out = append(out, bestMandatoryLiteral(candidate))
+			out = append(out, candidate...)
 		}
 		return out
 	default:
