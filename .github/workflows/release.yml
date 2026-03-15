@@ -20,6 +20,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: publish-release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.event.pull_request.head.ref }}
@@ -100,6 +102,9 @@ jobs:
         with:
           node-version: "20"
 
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        id: pages
+
       - name: Verify release tree
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
@@ -146,6 +151,33 @@ jobs:
 
       - name: Install workspace dependencies
         run: npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile
+
+      - name: Build website Pages bundle
+        env:
+          GBASH_WEBSITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_URL: https://${{ github.repository_owner }}.github.io${{ steps.pages.outputs.base_path }}
+          PAGES_ROOT: ${{ runner.temp }}/github-pages
+          COMPAT_URL: https://${{ github.repository_owner }}.github.io${{ steps.pages.outputs.base_path }}/compat/latest
+        run: |
+          set -euo pipefail
+          ./scripts/export_website_pages.sh "$PWD" "$PAGES_ROOT"
+
+          compat_dir="$PAGES_ROOT/compat/latest"
+          mkdir -p "$compat_dir"
+
+          if curl --fail --location --silent --show-error --output "$compat_dir/summary.json" "$COMPAT_URL/summary.json" \
+            && curl --fail --location --silent --show-error --output "$compat_dir/index.html" "$COMPAT_URL/index.html" \
+            && curl --fail --location --silent --show-error --output "$compat_dir/badge.svg" "$COMPAT_URL/badge.svg"; then
+            echo "preserved compat report from $COMPAT_URL"
+          else
+            rm -rf "$compat_dir"
+            echo "no published compat report found at $COMPAT_URL; continuing without it"
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: ${{ runner.temp }}/github-pages
 
       - name: Detect existing GitHub release
         id: github_release
@@ -227,3 +259,20 @@ jobs:
       #   env:
       #     VERSION: ${{ needs.resolve.outputs.version }}
       #   run: echo "@ewhauser/gbash-wasm ${VERSION#v} is already published; skipping npm publish."
+
+  publish_pages:
+    needs:
+      - resolve
+      - publish
+    if: needs.resolve.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

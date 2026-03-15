@@ -24,8 +24,53 @@ jobs:
       deployable: ${{ steps.publish-state.outputs.deployable }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        id: pages
+
+      - name: Detect latest release tag for website
+        id: website_tag
+        run: |
+          set -euo pipefail
+          tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1 || true)"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build released website bundle
+        id: website_build
+        if: steps.website_tag.outputs.tag != ''
+        continue-on-error: true
+        env:
+          RELEASE_TAG: ${{ steps.website_tag.outputs.tag }}
+          RELEASED_SOURCE: ${{ runner.temp }}/released-website-source
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+          GBASH_WEBSITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_URL: https://${{ github.repository_owner }}.github.io${{ steps.pages.outputs.base_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RELEASED_SOURCE"
+          git worktree add --detach "$RELEASED_SOURCE" "$RELEASE_TAG"
+          cleanup() {
+            git worktree remove --force "$RELEASED_SOURCE" || true
+          }
+          trap cleanup EXIT
+
+          (
+            cd "$RELEASED_SOURCE"
+            npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile
+          )
+
+          ./scripts/export_website_pages.sh "$RELEASED_SOURCE" "$PAGES_ROOT"
 
       - name: Run GNU compatibility harness
         id: run-compat
@@ -59,10 +104,17 @@ jobs:
           PAGES_ROOT: ${{ runner.temp }}/compat-pages
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REF_NAME: ${{ github.ref_name }}
+          WEBSITE_TAG: ${{ steps.website_tag.outputs.tag }}
+          WEBSITE_BUILD_OUTCOME: ${{ steps.website_build.outcome }}
         shell: bash
         run: |
           set -euo pipefail
           bundle_dir="$PAGES_ROOT/compat/latest"
+
+          if [ "${WEBSITE_BUILD_OUTCOME:-}" != "success" ]; then
+            rm -rf "$PAGES_ROOT"
+            mkdir -p "$PAGES_ROOT"
+          fi
 
           rm -rf "$bundle_dir"
           mkdir -p "$bundle_dir"
@@ -82,8 +134,8 @@ jobs:
           fi
 
           if [ -f "$bundle_dir/summary.json" ] && [ -f "$bundle_dir/index.html" ] && [ -f "$bundle_dir/badge.svg" ] && [ "$REF_NAME" = "$DEFAULT_BRANCH" ]; then
-            mkdir -p "$PAGES_ROOT"
-            cat > "$PAGES_ROOT/index.html" <<'EOF'
+            if [ "${WEBSITE_BUILD_OUTCOME:-}" != "success" ]; then
+              cat > "$PAGES_ROOT/index.html" <<'EOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -96,6 +148,8 @@ jobs:
           </body>
           </html>
           EOF
+            fi
+            touch "$PAGES_ROOT/.nojekyll"
             echo "deployable=true" >> "$GITHUB_OUTPUT"
           else
             echo "deployable=false" >> "$GITHUB_OUTPUT"
@@ -110,12 +164,24 @@ jobs:
           DEPLOYABLE: ${{ steps.publish-state.outputs.deployable }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REF_NAME: ${{ github.ref_name }}
+          WEBSITE_TAG: ${{ steps.website_tag.outputs.tag }}
+          WEBSITE_BUILD_OUTCOME: ${{ steps.website_build.outcome }}
         run: |
           {
             echo "## Compatibility"
             echo
             echo "Harness exit code: \`$COMPAT_EXIT_CODE\`"
             echo
+            if [ -n "$WEBSITE_TAG" ] && [ "$WEBSITE_BUILD_OUTCOME" = "success" ]; then
+              echo "Website bundle source: released tag \`$WEBSITE_TAG\`"
+              echo
+            elif [ -n "$WEBSITE_TAG" ]; then
+              echo "Website bundle source: failed to build released tag \`$WEBSITE_TAG\`; using compat-only fallback."
+              echo
+            else
+              echo "Website bundle source: no release tag found; using compat-only fallback."
+              echo
+            fi
             if [ "$DEPLOYABLE" = "true" ]; then
               echo "Published latest report: $PAGE_URL"
             elif [ "$PUBLISHABLE" = "true" ]; then
@@ -143,6 +209,9 @@ jobs:
     if: always() && needs.compat.outputs.deployable == 'true'
     needs: compat
     runs-on: ubuntu-24.04
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

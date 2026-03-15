@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { withBasePath } from "@/app/lib/site";
 
 export default function Footer() {
   return (
@@ -7,7 +8,11 @@ export default function Footer() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="" className="h-6 w-6 opacity-60" />
+            <img
+              src={withBasePath("/logo.svg")}
+              alt=""
+              className="h-6 w-6 opacity-60"
+            />
             <span className="text-sm text-fg-dim">
               gbash — Apache 2.0 License
             </span>

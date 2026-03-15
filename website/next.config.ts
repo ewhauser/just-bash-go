@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 import createMDX from "@next/mdx";
 
 const isDev = process.env.NODE_ENV !== "production";
+const isStaticExport = process.env.GBASH_WEBSITE_EXPORT === "1";
+const basePath = process.env.GBASH_WEBSITE_BASE_PATH ?? "";
 
 const cspHeader = `
   default-src 'self';
@@ -21,13 +23,21 @@ const cspHeader = `
 const withMDX = createMDX({});
 
 const nextConfig: NextConfig = {
+  basePath: basePath || undefined,
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
+  output: isStaticExport ? "export" : undefined,
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
-  headers: async () => [
-    {
-      source: "/(.*)",
-      headers: [{ key: "Content-Security-Policy", value: cspHeader }],
-    },
-  ],
+  trailingSlash: isStaticExport,
+  headers: isStaticExport
+    ? undefined
+    : async () => [
+        {
+          source: "/(.*)",
+          headers: [{ key: "Content-Security-Policy", value: cspHeader }],
+        },
+      ],
 };
 
 export default withMDX(nextConfig);
