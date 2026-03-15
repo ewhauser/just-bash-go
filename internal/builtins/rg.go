@@ -711,7 +711,7 @@ func (c *RG) includeFile(display, abs string, opts *rgOptions, ignoreMatcher *rg
 // rgMatchGlobSet evaluates globs in order with last-match-wins semantics.
 // Returns (include, positiveMatched) where positiveMatched indicates a positive
 // glob explicitly matched (used to override ignore rules).
-func rgMatchGlobSet(display, filename string, globs []string, ignoreCase bool) (include bool, positiveMatched bool) {
+func rgMatchGlobSet(display, filename string, globs []string, ignoreCase bool) (include, positiveMatched bool) {
 	if len(globs) == 0 {
 		return true, false
 	}
