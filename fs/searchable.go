@@ -177,6 +177,9 @@ func (s *searchableFS) Link(ctx context.Context, oldName, newName string) error 
 		return err
 	}
 	s.recordHardLink(oldAbs, newAbs)
+	if err := s.refreshTrackedSymlink(ctx, newAbs); err != nil {
+		return err
+	}
 	return s.syncSearchPath(ctx, newAbs)
 }
 
@@ -327,7 +330,7 @@ func walkSearchSnapshot(ctx context.Context, fsys FileSystem, current string, ou
 	}
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
 		info, err := fsys.Stat(ctx, current)
-		if err != nil || info.IsDir() {
+		if err != nil || !searchIndexableFileInfo(info) {
 			return nil
 		}
 		data, err := readAllSearchFile(ctx, fsys, current)
@@ -338,6 +341,9 @@ func walkSearchSnapshot(ctx context.Context, fsys FileSystem, current string, ou
 		return nil
 	}
 	if !linfo.IsDir() {
+		if !searchIndexableFileInfo(linfo) {
+			return nil
+		}
 		data, err := readAllSearchFile(ctx, fsys, current)
 		if err != nil {
 			return err
@@ -365,6 +371,10 @@ func readAllSearchFile(ctx context.Context, fsys FileSystem, name string) ([]byt
 	}
 	defer func() { _ = file.Close() }()
 	return io.ReadAll(file)
+}
+
+func searchIndexableFileInfo(info stdfs.FileInfo) bool {
+	return info != nil && info.Mode().IsRegular()
 }
 
 func (s *searchableFS) bootstrapSearchTracking(ctx context.Context) error {
@@ -509,12 +519,17 @@ func (s *searchableFS) syncSearchPath(ctx context.Context, name string) error {
 			})
 		case err != nil:
 			return err
-		case info.IsDir():
+		case !searchIndexableFileInfo(info):
 			return s.search.ApplySearchMutation(ctx, &SearchMutation{
 				Kind: SearchMutationRemove,
 				Path: abs,
 			})
 		}
+	} else if !searchIndexableFileInfo(linfo) {
+		return s.search.ApplySearchMutation(ctx, &SearchMutation{
+			Kind: SearchMutationRemove,
+			Path: abs,
+		})
 	}
 
 	data, err := readAllSearchFile(ctx, s.inner, abs)

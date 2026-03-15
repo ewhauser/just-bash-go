@@ -1,9 +1,12 @@
 package fs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	stdfs "io/fs"
 	"os"
 	"slices"
 	"testing"
@@ -203,10 +206,14 @@ func TestSearchableFSIndexesNewLinks(t *testing.T) {
 	if err := fsys.Link(context.Background(), "/docs/file.txt", "/docs/link-hard.txt"); err != nil {
 		t.Fatalf("Link() error = %v", err)
 	}
+	if err := fsys.Link(context.Background(), "/docs/link-sym.txt", "/docs/link-sym-hard.txt"); err != nil {
+		t.Fatalf("Link(symlink) error = %v", err)
+	}
 
 	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, []string{
 		"/docs/file.txt",
 		"/docs/link-hard.txt",
+		"/docs/link-sym-hard.txt",
 		"/docs/link-sym.txt",
 	})
 
@@ -214,6 +221,7 @@ func TestSearchableFSIndexesNewLinks(t *testing.T) {
 	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "fresh"}, []string{
 		"/docs/file.txt",
 		"/docs/link-hard.txt",
+		"/docs/link-sym-hard.txt",
 		"/docs/link-sym.txt",
 	})
 	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, nil)
@@ -296,6 +304,15 @@ func TestSearchableFSBootstrapsExistingHardLinkTracking(t *testing.T) {
 		"/docs/target.txt",
 	})
 	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, nil)
+}
+
+func TestSearchableFSSkipsSpecialFilesDuringSnapshot(t *testing.T) {
+	fsys, err := NewSearchableFileSystem(context.Background(), snapshotFixtureFS{}, nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	provider := mustSearchProvider(t, fsys, "/")
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/", Literal: "needle"}, []string{"/regular.txt"})
 }
 
 func TestSearchableFSOpenFileTracksCreateWithoutWrite(t *testing.T) {
@@ -451,3 +468,99 @@ func assertIndexGeneration(t *testing.T, provider SearchProvider, want uint64) {
 		t.Fatalf("IndexedGeneration = %d, want %d", status.IndexedGeneration, want)
 	}
 }
+
+type snapshotFixtureFS struct{}
+
+func (snapshotFixtureFS) Open(_ context.Context, name string) (File, error) {
+	switch Clean(name) {
+	case "/regular.txt":
+		info := snapshotFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}
+		return snapshotFixtureFile{Reader: bytes.NewReader([]byte("needle\n")), info: info}, nil
+	case "/special.pipe":
+		return nil, fmt.Errorf("special file should not be opened")
+	default:
+		return nil, &os.PathError{Op: "open", Path: Clean(name), Err: stdfs.ErrNotExist}
+	}
+}
+
+func (fs snapshotFixtureFS) OpenFile(ctx context.Context, name string, _ int, _ stdfs.FileMode) (File, error) {
+	return fs.Open(ctx, name)
+}
+
+func (snapshotFixtureFS) Stat(_ context.Context, name string) (stdfs.FileInfo, error) {
+	switch Clean(name) {
+	case "/":
+		return snapshotFixtureInfo{name: "/", mode: stdfs.ModeDir | 0o755}, nil
+	case "/regular.txt":
+		return snapshotFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}, nil
+	case "/special.pipe":
+		return snapshotFixtureInfo{name: "special.pipe", mode: stdfs.ModeNamedPipe}, nil
+	default:
+		return nil, &os.PathError{Op: "stat", Path: Clean(name), Err: stdfs.ErrNotExist}
+	}
+}
+
+func (fs snapshotFixtureFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
+	return fs.Stat(ctx, name)
+}
+
+func (snapshotFixtureFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, error) {
+	if Clean(name) != "/" {
+		return nil, &os.PathError{Op: "readdir", Path: Clean(name), Err: stdfs.ErrNotExist}
+	}
+	return []stdfs.DirEntry{
+		stdfs.FileInfoToDirEntry(snapshotFixtureInfo{name: "regular.txt", mode: 0o644, size: int64(len("needle\n"))}),
+		stdfs.FileInfoToDirEntry(snapshotFixtureInfo{name: "special.pipe", mode: stdfs.ModeNamedPipe}),
+	}, nil
+}
+
+func (snapshotFixtureFS) Readlink(context.Context, string) (string, error) {
+	return "", stdfs.ErrInvalid
+}
+
+func (snapshotFixtureFS) Realpath(_ context.Context, name string) (string, error) {
+	return Clean(name), nil
+}
+
+func (snapshotFixtureFS) Symlink(context.Context, string, string) error { return stdfs.ErrPermission }
+func (snapshotFixtureFS) Link(context.Context, string, string) error    { return stdfs.ErrPermission }
+func (snapshotFixtureFS) Chown(context.Context, string, uint32, uint32, bool) error {
+	return stdfs.ErrPermission
+}
+func (snapshotFixtureFS) Chmod(context.Context, string, stdfs.FileMode) error {
+	return stdfs.ErrPermission
+}
+func (snapshotFixtureFS) Chtimes(context.Context, string, time.Time, time.Time) error {
+	return stdfs.ErrPermission
+}
+func (snapshotFixtureFS) MkdirAll(context.Context, string, stdfs.FileMode) error {
+	return stdfs.ErrPermission
+}
+func (snapshotFixtureFS) Remove(context.Context, string, bool) error   { return stdfs.ErrPermission }
+func (snapshotFixtureFS) Rename(context.Context, string, string) error { return stdfs.ErrPermission }
+func (snapshotFixtureFS) Getwd() string                                { return "/" }
+func (snapshotFixtureFS) Chdir(string) error                           { return stdfs.ErrPermission }
+
+type snapshotFixtureFile struct {
+	*bytes.Reader
+	info stdfs.FileInfo
+}
+
+func (snapshotFixtureFile) Write([]byte) (int, error) { return 0, stdfs.ErrPermission }
+func (snapshotFixtureFile) Close() error              { return nil }
+func (f snapshotFixtureFile) Stat() (stdfs.FileInfo, error) {
+	return f.info, nil
+}
+
+type snapshotFixtureInfo struct {
+	name string
+	mode stdfs.FileMode
+	size int64
+}
+
+func (i snapshotFixtureInfo) Name() string         { return i.name }
+func (i snapshotFixtureInfo) Size() int64          { return i.size }
+func (i snapshotFixtureInfo) Mode() stdfs.FileMode { return i.mode }
+func (i snapshotFixtureInfo) ModTime() time.Time   { return time.Unix(0, 0).UTC() }
+func (i snapshotFixtureInfo) IsDir() bool          { return i.mode.IsDir() }
+func (i snapshotFixtureInfo) Sys() any             { return nil }
