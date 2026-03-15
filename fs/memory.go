@@ -264,7 +264,7 @@ func (m *MemoryFS) Open(ctx context.Context, name string) (File, error) {
 }
 
 func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
-	if flag&os.O_TRUNC == 0 || !canWrite(flag) {
+	if (flag&os.O_TRUNC == 0 || !canWrite(flag)) && flag&(os.O_CREATE|os.O_EXCL) != (os.O_CREATE | os.O_EXCL) {
 		if _, _, err := m.materializePath(ctx, name, true); err != nil {
 			if flag&os.O_CREATE == 0 || !errors.Is(err, stdfs.ErrNotExist) {
 				return nil, &os.PathError{Op: "open", Path: Resolve(m.Getwd(), name), Err: err}
@@ -800,6 +800,7 @@ func (f *memoryFile) Write(p []byte) (int, error) {
 	if isLazyFileNode(node) {
 		f.fs.mu.Unlock()
 		if err := f.fs.materializeResolvedPath(context.Background(), f.path); err != nil {
+			f.fs.mu.Lock()
 			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
 		}
 		f.fs.mu.Lock()
