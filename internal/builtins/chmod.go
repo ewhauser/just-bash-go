@@ -96,18 +96,6 @@ func (c *Chmod) Spec() CommandSpec {
 	}
 }
 
-func (c *Chmod) runParsedShared(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
-	spec := c.Spec()
-	if matches.Has("help") {
-		return RenderCommandHelp(inv.Stdout, &spec)
-	}
-	opts, err := parseChmodMatches(inv, matches)
-	if err != nil {
-		return err
-	}
-	return runChmod(ctx, inv, &opts)
-}
-
 func isChmodNegativeMode(arg string) bool {
 	if len(arg) < 2 || arg[0] != '-' {
 		return false
@@ -217,7 +205,7 @@ func parseChmodInvocation(inv *Invocation, spec *CommandSpec) (chmodOptions, str
 	return opts, "", nil
 }
 
-func parseChmodLongOption(inv *Invocation, spec *CommandSpec, opts *chmodOptions, args []string) (string, []string, error) {
+func parseChmodLongOption(inv *Invocation, spec *CommandSpec, opts *chmodOptions, args []string) (action string, remaining []string, err error) {
 	raw := args[0]
 	name := strings.TrimPrefix(raw, "--")
 	value := ""
@@ -325,13 +313,13 @@ func matchChmodLongOption(spec *CommandSpec, name string) string {
 			}
 		}
 	}
-	if spec.Parse.AutoVersion && strings.HasPrefix("version", name) {
+	if spec.Parse.AutoVersion && chmodLongOptionPrefix(name, "version") {
 		if match != "" && match != "version" {
 			return ""
 		}
 		return "version"
 	}
-	if spec.Parse.AutoHelp && strings.HasPrefix("help", name) {
+	if spec.Parse.AutoHelp && chmodLongOptionPrefix(name, "help") {
 		if match != "" && match != "help" {
 			return ""
 		}
@@ -340,55 +328,8 @@ func matchChmodLongOption(spec *CommandSpec, name string) string {
 	return match
 }
 
-func parseChmodMatches(inv *Invocation, matches *ParsedCommand) (chmodOptions, error) {
-	opts := chmodOptions{
-		reference:    matches.Value("reference"),
-		referenceSet: matches.Has("reference"),
-		traverse:     permissionTraverseFirst,
-	}
-	for _, name := range matches.OptionOrder() {
-		switch name {
-		case "changes":
-			opts.changes = true
-		case "quiet":
-			opts.quiet = true
-		case "verbose":
-			opts.verbose = true
-		case "recursive":
-			opts.recursive = true
-		case "preserve-root":
-			opts.preserveRoot = true
-		case "no-preserve-root":
-			opts.preserveRoot = false
-		case "traverse-first":
-			opts.traverse = permissionTraverseFirst
-		case "traverse-all":
-			opts.traverse = permissionTraverseAll
-		case "traverse-none":
-			opts.traverse = permissionTraverseNone
-		case "dereference":
-			v := true
-			opts.dereference = &v
-		case "no-dereference":
-			v := false
-			opts.dereference = &v
-		}
-	}
-
-	positionals := matches.Positionals()
-	if opts.referenceSet {
-		if len(positionals) == 0 {
-			return chmodOptions{}, exitf(inv, 1, "chmod: missing operand after %s", quoteGNUOperand(opts.reference))
-		}
-		opts.files = positionals
-		return opts, nil
-	}
-	if len(positionals) < 2 {
-		return chmodOptions{}, exitf(inv, 1, "chmod: missing operand")
-	}
-	opts.modeSpec = positionals[0]
-	opts.files = positionals[1:]
-	return opts, nil
+func chmodLongOptionPrefix(name, full string) bool {
+	return name != "" && strings.HasPrefix(full, name)
 }
 
 func runChmod(ctx context.Context, inv *Invocation, opts *chmodOptions) error {
@@ -414,7 +355,7 @@ func runChmod(ctx context.Context, inv *Invocation, opts *chmodOptions) error {
 				if _, err := inv.FS.Stat(ctx, abs); errors.Is(err, stdfs.ErrNotExist) {
 					hadError = true
 					if !opts.quiet {
-						_, _ = fmt.Fprintln(inv.Stderr, fmt.Sprintf("chmod: cannot operate on dangling symlink %s", quoteGNUOperand(target)))
+						_, _ = fmt.Fprintf(inv.Stderr, "chmod: cannot operate on dangling symlink %s\n", quoteGNUOperand(target))
 					}
 					continue
 				}
@@ -826,8 +767,8 @@ func chmodPermissionDeniedPath(inv *Invocation, fallback, raw string) string {
 	if raw == cwd {
 		return "."
 	}
-	if strings.HasPrefix(raw, cwd+"/") {
-		return strings.TrimPrefix(raw, cwd+"/")
+	if trimmed, ok := strings.CutPrefix(raw, cwd+"/"); ok {
+		return trimmed
 	}
 	return raw
 }
