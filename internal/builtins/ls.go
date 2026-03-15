@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
-	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -54,12 +53,14 @@ type lsOptions struct {
 	timeStyle             string
 	dereference           lsDereferenceMode
 	dired                 bool
+	listedDirs            map[lsListedDirKey]struct{}
 }
 
 type lsEntry struct {
-	name       string
-	info       stdfs.FileInfo
-	groupAsDir bool
+	name                 string
+	info                 stdfs.FileInfo
+	groupAsDir           bool
+	unknownShortMetadata bool
 }
 
 type lsPathArg struct {
@@ -67,6 +68,12 @@ type lsPathArg struct {
 	abs        string
 	info       stdfs.FileInfo
 	groupAsDir bool
+}
+
+type lsListedDirKey struct {
+	dev  uint64
+	ino  uint64
+	path string
 }
 
 type lsParsedColors struct {
@@ -481,11 +488,26 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 		return "", 0, lsRenderResult{}, err
 	}
 	sortLSEntries(entryInfos, opts)
+	statusCode := 0
+	for _, entry := range entryInfos {
+		if entry.unknownShortMetadata {
+			statusCode = 1
+			break
+		}
+	}
 
 	var out strings.Builder
 	result := lsRenderResult{}
+	if opts.recursive {
+		if _, err := lsRememberListedDirectory(ctx, inv, abs, info, opts); err != nil {
+			return "", 0, lsRenderResult{}, err
+		}
+	}
 	if opts.recursive || showHeader {
 		header := lsQuoteName(target, opts.quotingMode, opts.hideControlChars)
+		if lsShouldUseColor(inv, opts.hyperlinkMode) {
+			header = lsHyperlink(header, lsHeaderHyperlinkTarget(ctx, inv, abs, info, opts))
+		}
 		if opts.dired {
 			out.WriteString("  ")
 			start := out.Len()
@@ -497,12 +519,12 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 			out.WriteString(":\n")
 		}
 	}
-	if opts.longFormat {
+	if lsShouldShowDirectoryTotal(opts) {
 		if opts.dired {
 			out.WriteString("  ")
 		}
 		out.WriteString("total ")
-		out.WriteString(strconv.Itoa(len(entryInfos)))
+		out.WriteString(strconv.FormatInt(lsDirectoryTotal(entryInfos, opts), 10))
 		out.WriteByte('\n')
 	}
 	entryRendered, err := lsRenderEntries(ctx, inv, abs, entryInfos, opts, func(value string) string { return value }, false)
@@ -520,6 +542,7 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 
 	if opts.recursive {
 		subdirs := make([]lsEntry, 0)
+		recursiveStatus := statusCode
 		for _, entry := range entryInfos {
 			if entry.name == "." || entry.name == ".." || !entry.info.IsDir() {
 				continue
@@ -527,8 +550,8 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 			subdirs = append(subdirs, entry)
 		}
 		for _, dir := range subdirs {
-			out.WriteByte('\n')
 			subTarget := target
+			subAbs := path.Join(abs, dir.name)
 			switch subTarget {
 			case ".":
 				subTarget = "./" + dir.name
@@ -537,6 +560,16 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 			default:
 				subTarget = lsJoinRecursiveTarget(subTarget, dir.name)
 			}
+			alreadyListed, err := lsHasListedDirectory(ctx, inv, subAbs, dir.info, opts)
+			if err != nil {
+				return "", 0, lsRenderResult{}, err
+			}
+			if alreadyListed {
+				_, _ = fmt.Fprintf(inv.Stderr, "ls: %s: not listing already-listed directory\n", subTarget)
+				recursiveStatus = max(recursiveStatus, 2)
+				continue
+			}
+			out.WriteByte('\n')
 			subOutput, status, subRendered, err := c.listPath(ctx, inv, subTarget, opts, false)
 			if err != nil {
 				return "", 0, lsRenderResult{}, err
@@ -553,12 +586,16 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 				return out.String(), status, result, nil
 			}
 		}
+		return out.String(), recursiveStatus, result, nil
 	}
 
-	return out.String(), 0, result, nil
+	return out.String(), statusCode, result, nil
 }
 
 func lsStatMaybeForTarget(ctx context.Context, inv *Invocation, target string, opts *lsOptions) (info stdfs.FileInfo, abs string, exists bool, err error) {
+	if target != "/" && strings.HasSuffix(target, "/") {
+		return statMaybe(ctx, inv, policy.FileActionStat, target)
+	}
 	switch {
 	case opts == nil || opts.dereference == lsDerefAll || opts.dereference == lsDerefArgs:
 		linfo, lAbs, lExists, lErr := lstatMaybe(ctx, inv, policy.FileActionLstat, target)
@@ -607,7 +644,7 @@ func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs s
 		}
 		return line, 0, lsRenderResult{text: line, dired: dired}, nil
 	}
-	line := formatLSShortPrefix(info, opts) + name + lsTerminator(opts)
+	line := formatLSShortPrefix(info, opts, false) + name + lsTerminator(opts)
 	return line, 0, lsRenderResult{text: line}, nil
 }
 
@@ -662,7 +699,7 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 			offset += len(line)
 			continue
 		}
-		names = append(names, formatLSShortPrefix(entry.info, opts)+name)
+		names = append(names, formatLSShortPrefix(entry.info, opts, entry.unknownShortMetadata)+name)
 	}
 	if opts.longFormat {
 		result.text = strings.Join(names, "")
@@ -697,7 +734,7 @@ func lsRenderPathArgs(ctx context.Context, inv *Invocation, args []lsPathArg, op
 			offset += len(line)
 			continue
 		}
-		names = append(names, formatLSShortPrefix(arg.info, opts)+name)
+		names = append(names, formatLSShortPrefix(arg.info, opts, false)+name)
 	}
 	if opts.longFormat {
 		result.text = strings.Join(names, "")
@@ -745,6 +782,9 @@ func lsRunTargets(ctx context.Context, inv *Invocation, commandName string, targ
 
 	renderDirs := func() error {
 		for i, target := range dirTargets {
+			if opts.recursive {
+				opts.listedDirs = make(map[lsListedDirKey]struct{})
+			}
 			if i > 0 && stdout.Len() > 0 && !strings.HasSuffix(stdout.String(), "\n\n") {
 				stdout.WriteByte('\n')
 			}
@@ -1323,7 +1363,86 @@ func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, 
 }
 
 func lsHyperlink(label, target string) string {
-	return "\x1b]8;;" + (&url.URL{Scheme: "file", Path: target}).String() + "\x1b\\" + label + "\x1b]8;;\x1b\\"
+	return "\x1b]8;;" + lsFileURI(target) + "\x1b\\" + label + "\x1b]8;;\x1b\\"
+}
+
+func lsFileURI(target string) string {
+	var b strings.Builder
+	b.Grow(len(target) + len("file://"))
+	b.WriteString("file://")
+	for i := 0; i < len(target); i++ {
+		ch := target[i]
+		if ch == '/' || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' || ch == '_' || ch == '~' {
+			b.WriteByte(ch)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte("0123456789abcdef"[ch>>4])
+		b.WriteByte("0123456789abcdef"[ch&0x0f])
+	}
+	return b.String()
+}
+
+func lsHasListedDirectory(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, opts *lsOptions) (bool, error) {
+	key, ok, err := lsListedDirectoryKey(ctx, inv, abs, info, opts)
+	if err != nil || !ok || opts == nil || opts.listedDirs == nil {
+		return false, err
+	}
+	_, seen := opts.listedDirs[key]
+	return seen, nil
+}
+
+func lsRememberListedDirectory(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, opts *lsOptions) (bool, error) {
+	key, ok, err := lsListedDirectoryKey(ctx, inv, abs, info, opts)
+	if err != nil || !ok {
+		return false, err
+	}
+	if opts.listedDirs == nil {
+		opts.listedDirs = make(map[lsListedDirKey]struct{})
+	}
+	_, seen := opts.listedDirs[key]
+	if !seen {
+		opts.listedDirs[key] = struct{}{}
+	}
+	return seen, nil
+}
+
+func lsListedDirectoryKey(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, opts *lsOptions) (lsListedDirKey, bool, error) {
+	if opts == nil || info == nil || !info.IsDir() {
+		return lsListedDirKey{}, false, nil
+	}
+	keyPath := path.Clean(abs)
+	keyInfo := info
+	linfo, _, err := lstatPath(ctx, inv, abs)
+	if err != nil {
+		return lsListedDirKey{}, false, err
+	}
+	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		resolvedInfo, resolvedAbs, resolveErr := lsResolveSymlinkInfo(ctx, inv, abs)
+		if resolveErr == nil && resolvedInfo.IsDir() {
+			keyInfo = resolvedInfo
+			keyPath = resolvedAbs
+		}
+	}
+	if dev, ino, ok := testDeviceAndInode(keyInfo); ok {
+		return lsListedDirKey{dev: dev, ino: ino}, true, nil
+	}
+	return lsListedDirKey{path: keyPath}, true, nil
+}
+
+func lsHeaderHyperlinkTarget(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, opts *lsOptions) string {
+	if opts == nil || info == nil || !info.IsDir() || opts.dereference == lsDerefNone {
+		return abs
+	}
+	linfo, _, err := lstatPath(ctx, inv, abs)
+	if err != nil || linfo.Mode()&stdfs.ModeSymlink == 0 {
+		return abs
+	}
+	_, resolvedAbs, err := lsResolveSymlinkInfo(ctx, inv, abs)
+	if err != nil {
+		return abs
+	}
+	return resolvedAbs
 }
 
 func lsQuotedNameWithDired(ctx context.Context, inv *Invocation, rawName, abs string, _ stdfs.FileInfo, opts *lsOptions, quote func(string) string) (string, []lsByteRange, error) {
@@ -1621,11 +1740,16 @@ func (c *LS) loadLSEntries(ctx context.Context, inv *Invocation, dirAbs string, 
 			}
 			entries = append(entries, lsEntry{name: name, info: info, groupAsDir: info.IsDir()})
 		default:
-			info, groupAsDir, err := lsLoadEntryInfo(ctx, inv, path.Join(dirAbs, name), opts)
+			info, groupAsDir, unknownShortMetadata, err := lsLoadEntryInfo(ctx, inv, path.Join(dirAbs, name), opts)
 			if err != nil {
 				return nil, err
 			}
-			entries = append(entries, lsEntry{name: name, info: info, groupAsDir: groupAsDir})
+			entries = append(entries, lsEntry{
+				name:                 name,
+				info:                 info,
+				groupAsDir:           groupAsDir,
+				unknownShortMetadata: unknownShortMetadata,
+			})
 		}
 	}
 	return entries, nil
@@ -1688,10 +1812,10 @@ func sortLSEntries(entries []lsEntry, opts *lsOptions) {
 	}
 }
 
-func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsOptions) (info stdfs.FileInfo, groupAsDir bool, err error) {
+func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsOptions) (info stdfs.FileInfo, groupAsDir bool, unknownShortMetadata bool, err error) {
 	linfo, _, err := lstatPath(ctx, inv, abs)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 
 	info = linfo
@@ -1710,23 +1834,23 @@ func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsO
 				info = targetInfo
 			}
 		case opts != nil && opts.dereference == lsDerefAll && lsCanListBrokenImplicitSymlink(opts, linfo):
-			return linfo, false, nil
+			return linfo, false, opts.showInode || opts.showAllocSize, nil
 		case opts != nil && opts.dereference == lsDerefAll:
-			return nil, false, statErr
+			return nil, false, false, statErr
 		}
-		return info, groupAsDir, nil
+		return info, groupAsDir, false, nil
 	}
 
 	if opts != nil && opts.dereference == lsDerefAll {
 		info, _, err = statPath(ctx, inv, abs)
 		if err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
 		if opts.groupDirectoriesFirst && opts.sortMode != lsSortNone {
 			groupAsDir = info.IsDir()
 		}
 	}
-	return info, groupAsDir, nil
+	return info, groupAsDir, false, nil
 }
 
 func lsGroupsAsDirectory(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo) bool {
@@ -1744,7 +1868,7 @@ func lsCanListBrokenImplicitSymlink(opts *lsOptions, info stdfs.FileInfo) bool {
 	if opts == nil || info == nil || info.Mode()&stdfs.ModeSymlink == 0 {
 		return false
 	}
-	return !opts.longFormat && opts.indicatorMode == lsIndicatorNone && !opts.showInode && !opts.showAllocSize
+	return !opts.longFormat && opts.indicatorMode == lsIndicatorNone
 }
 
 func lsResolveSymlinkInfo(ctx context.Context, inv *Invocation, abs string) (stdfs.FileInfo, string, error) {
@@ -1949,22 +2073,49 @@ func formatLSSize(info stdfs.FileInfo, opts *lsOptions) string {
 	}
 }
 
-func formatLSBlockCount(info stdfs.FileInfo, opts *lsOptions) string {
+func lsBlockCountValue(info stdfs.FileInfo, opts *lsOptions) int64 {
 	blockSize := opts.blockSize
 	if blockSize <= 0 {
 		blockSize = 1024
 	}
 	size := info.Size()
-	return strconv.FormatInt((size+blockSize-1)/blockSize, 10)
+	return (size + blockSize - 1) / blockSize
 }
 
-func formatLSShortPrefix(info stdfs.FileInfo, opts *lsOptions) string {
+func formatLSBlockCount(info stdfs.FileInfo, opts *lsOptions) string {
+	return strconv.FormatInt(lsBlockCountValue(info, opts), 10)
+}
+
+func lsShouldShowDirectoryTotal(opts *lsOptions) bool {
+	return opts != nil && (opts.longFormat || opts.showAllocSize)
+}
+
+func lsDirectoryTotal(entries []lsEntry, opts *lsOptions) int64 {
+	var total int64
+	for _, entry := range entries {
+		if entry.unknownShortMetadata {
+			continue
+		}
+		total += lsBlockCountValue(entry.info, opts)
+	}
+	return total
+}
+
+func formatLSShortPrefix(info stdfs.FileInfo, opts *lsOptions, unknownMetadata bool) string {
 	parts := make([]string, 0, 2)
 	if opts.showInode {
-		parts = append(parts, strconv.FormatUint(statInode(info), 10))
+		if unknownMetadata {
+			parts = append(parts, "?")
+		} else {
+			parts = append(parts, strconv.FormatUint(statInode(info), 10))
+		}
 	}
 	if opts.showAllocSize {
-		parts = append(parts, formatLSBlockCount(info, opts))
+		if unknownMetadata {
+			parts = append(parts, "?")
+		} else {
+			parts = append(parts, formatLSBlockCount(info, opts))
+		}
 	}
 	if len(parts) == 0 {
 		return ""

@@ -256,6 +256,43 @@ func TestLSLongFormatListsDanglingSymlinkWithoutDereferencing(t *testing.T) {
 	}
 }
 
+func TestLSDereferenceKeepsDanglingDirectoryEntriesForInodeAndBlockPrefixes(t *testing.T) {
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/ls-dangle-dir/d", 0o755); err != nil {
+		t.Fatalf("MkdirAll(d) error = %v", err)
+	}
+	if err := session.FileSystem().Symlink(context.Background(), "no-such", "/tmp/ls-dangle-dir/d/dangle"); err != nil {
+		t.Fatalf("Symlink(dangle) error = %v", err)
+	}
+
+	result := mustExecSession(t, session,
+		"cd /tmp/ls-dangle-dir\n"+
+			"ls -Li d\n"+
+			"echo ---\n"+
+			"ls -Ls d\n",
+	)
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+	if got, want := parts[0], "? dangle\n"; got != want {
+		t.Fatalf("ls -Li output = %q, want %q", got, want)
+	}
+	if got, want := parts[1], "total 0\n? dangle\n"; got != want {
+		t.Fatalf("ls -Ls output = %q, want %q", got, want)
+	}
+}
+
 func TestDirUsesDirUsageAndNonLongDefaultOutput(t *testing.T) {
 	session := newSession(t, &Config{})
 
@@ -692,6 +729,31 @@ func TestLSHyperlinkMode(t *testing.T) {
 	}
 }
 
+func TestLSHyperlinkRecursiveHeadersAndLowercaseEscaping(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-hyperlink/sub/col:on", []byte("x"))
+	writeSessionFile(t, session, "/tmp/ls-hyperlink/sub/back\\slash", []byte("x"))
+	writeSessionFile(t, session, "/tmp/ls-hyperlink/sub/ques?tion", []byte("x"))
+
+	result := mustExecSession(t, session, "ls --hyperlink=always -R /tmp/ls-hyperlink/sub\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "\x1b]8;;file:///tmp/ls-hyperlink/sub\x1b\\/tmp/ls-hyperlink/sub\x1b]8;;\x1b\\:") {
+		t.Fatalf("Stdout = %q, want recursive header hyperlink", result.Stdout)
+	}
+	for _, want := range []string{
+		"file:///tmp/ls-hyperlink/sub/back%5cslash",
+		"file:///tmp/ls-hyperlink/sub/col%3aon",
+		"file:///tmp/ls-hyperlink/sub/ques%3ftion",
+	} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("Stdout = %q, want hyperlink target %q", result.Stdout, want)
+		}
+	}
+}
+
 func TestLSSupportsFormatSortingAndFilteringParityFlags(t *testing.T) {
 	session := newSession(t, &Config{})
 
@@ -1000,6 +1062,31 @@ func TestLSRecursiveListsCommandLineFilesBeforeDirectories(t *testing.T) {
 	}
 	if got, want := result.Stdout, "f\n\nx:\n\ny:\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLSTrailingSlashDereferencesCommandLineSymlinkToDir(t *testing.T) {
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/ls-slash/dir", 0o755); err != nil {
+		t.Fatalf("MkdirAll(dir) error = %v", err)
+	}
+	if err := session.FileSystem().Symlink(context.Background(), "dir", "/tmp/ls-slash/symlink"); err != nil {
+		t.Fatalf("Symlink(symlink) error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "cd /tmp/ls-slash\nls -l symlink/\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "total 0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
 	}
 }
 
