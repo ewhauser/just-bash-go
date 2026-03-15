@@ -6,7 +6,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/internal/builtins"
@@ -17,6 +19,10 @@ type runtimeOptions struct {
 	readWriteRoot string
 	cwd           string
 	json          bool
+	server        bool
+	socket        string
+	sessionTTL    time.Duration
+	replayBytes   int
 }
 
 func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
@@ -58,6 +64,48 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 			opts.cwd = strings.TrimPrefix(arg, "--cwd=")
 		case arg == "--json":
 			opts.json = true
+		case arg == "--server":
+			opts.server = true
+		case arg == "--socket":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--socket requires a path")
+			}
+			i++
+			opts.socket = args[i]
+		case strings.HasPrefix(arg, "--socket="):
+			opts.socket = strings.TrimPrefix(arg, "--socket=")
+		case arg == "--session-ttl":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--session-ttl requires a duration")
+			}
+			i++
+			ttl, err := time.ParseDuration(args[i])
+			if err != nil {
+				return opts, nil, fmt.Errorf("parse --session-ttl: %w", err)
+			}
+			opts.sessionTTL = ttl
+		case strings.HasPrefix(arg, "--session-ttl="):
+			ttl, err := time.ParseDuration(strings.TrimPrefix(arg, "--session-ttl="))
+			if err != nil {
+				return opts, nil, fmt.Errorf("parse --session-ttl: %w", err)
+			}
+			opts.sessionTTL = ttl
+		case arg == "--replay-bytes":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--replay-bytes requires an integer")
+			}
+			i++
+			replayBytes, err := strconv.Atoi(args[i])
+			if err != nil {
+				return opts, nil, fmt.Errorf("parse --replay-bytes: %w", err)
+			}
+			opts.replayBytes = replayBytes
+		case strings.HasPrefix(arg, "--replay-bytes="):
+			replayBytes, err := strconv.Atoi(strings.TrimPrefix(arg, "--replay-bytes="))
+			if err != nil {
+				return opts, nil, fmt.Errorf("parse --replay-bytes: %w", err)
+			}
+			opts.replayBytes = replayBytes
 		case arg == "--":
 			rest = append(rest, args[i:]...)
 			return opts, rest, nil
@@ -88,7 +136,10 @@ func bashInvocationValueCount(arg string) int {
 	return count
 }
 
-func (opts runtimeOptions) gbashOptions() ([]gbash.Option, error) {
+func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
+	if opts == nil {
+		return nil, nil
+	}
 	rootValue := strings.TrimSpace(opts.root)
 	readWriteRoot := strings.TrimSpace(opts.readWriteRoot)
 	cwdValue := strings.TrimSpace(opts.cwd)
@@ -171,7 +222,7 @@ func normalizeSandboxPath(value string) string {
 	return path.Clean(value)
 }
 
-func newRuntime(cfg Config, opts runtimeOptions) (*gbash.Runtime, error) {
+func newRuntime(cfg Config, opts *runtimeOptions) (*gbash.Runtime, error) {
 	runtimeOpts, err := opts.gbashOptions()
 	if err != nil {
 		return nil, err
@@ -195,6 +246,11 @@ func renderHelp(w io.Writer, name string) error {
 		"  --cwd DIR             set the initial sandbox working directory\n"+
 		"  --readwrite-root DIR  mount DIR as sandbox / with writes persisted back to the host filesystem\n"+
 		"\nCLI output options:\n"+
-		"  --json                emit one JSON result object for a non-interactive execution\n")
+		"  --json                emit one JSON result object for a non-interactive execution\n"+
+		"\nCLI server options:\n"+
+		"  --server              run the shared gbash server instead of executing a script\n"+
+		"  --socket PATH         listen on PATH for Unix domain socket clients\n"+
+		"  --session-ttl DURATION  keep detached sessions alive for DURATION before expiry\n"+
+		"  --replay-bytes N      retain up to N bytes per stream channel for replay on reattach\n")
 	return err
 }

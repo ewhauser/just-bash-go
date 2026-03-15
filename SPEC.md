@@ -140,6 +140,9 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --cwd <dir> ...` sets the initial sandbox working directory
 - `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
 - `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled
+- `gbash --server --socket <path>` serves a long-lived Unix domain socket protocol instead of executing a script
+- `gbash --session-ttl <duration>` controls how long detached server sessions survive without active work
+- `gbash --replay-bytes <n>` controls how many bytes per stream channel the server retains for replay on reattach
 - when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
 
 External test harnesses should use the normal CLI entrypoint together with the filesystem selection flags above. In particular, GNU-style wrapper scripts may invoke `gbash --readwrite-root <tempdir> --cwd <dir> -c 'exec "$@"' _ <utility> ...` so the harness exercises the same shell and runtime path as normal `gbash` execution.
@@ -148,6 +151,7 @@ That frontend is also exposed as a public `cli` package so shipped binaries can 
 
 - `cmd/gbash` is a thin wrapper over `github.com/ewhauser/gbash/cli`
 - `contrib/extras/cmd/gbash-extras` is a thin wrapper over the same package with `contrib/extras` pre-registered into the runtime
+- `github.com/ewhauser/gbash/server` is the shared public server surface used by both wrapper binaries to host the same session protocol over Unix sockets
 
 ### 6.1 Session model
 
@@ -163,7 +167,42 @@ That frontend is also exposed as a public `cli` package so shipped binaries can 
 
 This matches the agent workflow we care about: a sequence of shell calls operating on a shared sandboxed workspace, without requiring shell-local state to leak between calls unless we explicitly add that feature later.
 
-### 6.2 Default sandbox layout
+### 6.2 Server mode
+
+`gbash` should also expose a local-first server mode for hosts that want a long-lived control connection instead of direct in-process method calls.
+
+- the server transport is a Unix domain socket in v1, but the message framing should stay transport-agnostic
+- `session_id` maps 1:1 to a persistent `Session`
+- child streams inside one session are first-class and represent either `exec.start` or `shell.start`
+- multiple sessions may be active concurrently over one connection
+- a single session permits at most one active child stream at a time because `Session.Exec` and `Session.Interact` are serialized
+- filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
+- the protocol is JSON message envelopes with request/response correlation plus async events
+- every routed message carries explicit `session_id`, and stream-scoped messages also carry `stream_id`
+- stream output is evented data, not response bodies; stdout and stderr use explicit `channel` values and per-channel `seq` numbers
+- reconnect and detach/reattach are first-class via `stream.attach`, bounded replay buffers, and per-channel replay cursors
+- multiple read-only attachments are allowed, but only one attachment may own stdin writes for a running stream
+
+Recommended v1 methods:
+
+- `hello`, `ping`
+- `session.create`, `session.get`, `session.list`, `session.destroy`
+- `exec.start`, `shell.start`
+- `stream.attach`, `stream.detach`, `stream.write`, `stream.close`, `stream.cancel`
+
+Recommended v1 events:
+
+- `session.created`, `session.updated`
+- `stream.data`, `stream.exit`, `stream.error`
+
+Explicit v1 non-goals:
+
+- filesystem RPC
+- PTY resize and host TTY emulation
+- signal forwarding and job control
+- restart-persistent sessions
+
+### 6.3 Default sandbox layout
 
 The default in-memory sandbox should look Unix-like enough for agent scripts:
 
@@ -186,6 +225,7 @@ Because `mvdan/sh` currently validates `interp.Dir(...)` against the host filesy
 ```text
 cli/                   reusable CLI frontend shared by shipped binaries
 cmd/gbash/             CLI entrypoint for local execution
+server/                public Unix-socket server surface shared by wrapper binaries
 internal/runtime/      internal runtime implementation and execution orchestration
 shell/                mvdan/sh integration and handler wiring
 fs/                   project-owned filesystem interfaces and virtual backends
@@ -202,6 +242,7 @@ tests/                integration fixtures and compatibility-style harnesses
 Package responsibilities:
 
 - `cli/`: reusable CLI frontend that parses shell flags, renders help/version output, handles interactive mode, and provisions runtimes for thin wrapper binaries
+- `server/`: public shared server implementation that owns Unix-socket listeners, protocol framing, session registries, replay buffers, and stream attachment semantics for both shipped CLIs and external hosts
 - `internal/runtime/`: internal runtime/session creation, run configuration, result collection, output capture
 - `shell/`: parser and runner adapter; no product policy lives here
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends

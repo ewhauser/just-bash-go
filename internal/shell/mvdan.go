@@ -79,7 +79,8 @@ type resolvedCommand struct {
 }
 
 type MVdan struct {
-	parser *syntax.Parser
+	parser   *syntax.Parser
+	parserMu sync.Mutex
 }
 
 const hostRunnerDir = "/"
@@ -104,6 +105,8 @@ func New() *MVdan {
 }
 
 func (m *MVdan) Parse(name, script string) (*syntax.File, error) {
+	m.parserMu.Lock()
+	defer m.parserMu.Unlock()
 	return m.parser.Parse(strings.NewReader(script), name)
 }
 

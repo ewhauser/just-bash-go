@@ -1,0 +1,940 @@
+# Server
+
+The `server` package exposes the shared gbash daemon surface used by both `gbash` and `gbash-extras` when they run in `--server` mode.
+
+This page documents the v1 wire protocol as implemented today so external clients can talk to the daemon directly.
+
+## Public API
+
+```go
+type Config struct {
+    Runtime     *gbash.Runtime
+    Name        string
+    Version     string
+    SessionTTL  time.Duration
+    ReplayBytes int
+}
+
+func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) error
+func Serve(ctx context.Context, ln net.Listener, cfg Config) error
+```
+
+Use `ListenAndServeUnix` when you want the package to create and manage the Unix domain socket path for you. Use `Serve` when your host already owns the listener.
+
+## Starting the Server
+
+The shipped CLIs expose the same server:
+
+```bash
+gbash --server --socket /tmp/gbash.sock --session-ttl 30m --replay-bytes 1048576
+```
+
+```bash
+gbash-extras --server --socket /tmp/gbash-extras.sock
+```
+
+Filesystem layout is fixed at server startup through the normal runtime or CLI options such as `--root`, `--readwrite-root`, and `--cwd`. The protocol does not provide filesystem RPC in v1.
+
+## Transport and Framing
+
+- v1 transport is a Unix domain socket.
+- The message model is transport-agnostic JSON envelopes.
+- Requests, responses, and events share one long-lived bidirectional connection.
+- Multiple sessions may be active concurrently over one connection.
+- Requests may be in flight concurrently; clients must correlate responses by `id`.
+- Asynchronous events can arrive between any two responses.
+
+On the Unix-socket transport, messages are emitted as a stream of JSON values. The current implementation uses Go's `json.Encoder` and `json.Decoder`, so line-delimited JSON works in practice, but clients should treat the socket as a stream of JSON objects rather than depending on whitespace details.
+
+## Session and Stream Model
+
+The protocol has two identity layers:
+
+- `session_id` identifies one persistent `gbash.Session`.
+- `stream_id` identifies one child operation inside that session.
+
+Child streams are one of:
+
+- `exec.start` for non-interactive `Session.Exec`
+- `shell.start` for interactive `Session.Interact`
+
+Important semantics:
+
+- Filesystem state persists for the life of the session.
+- A session may have many historical streams, but only one active stream at a time.
+- `exec.start` is non-interactive shell execution. If you want environment continuity across separate execs, feed `stream.exit.final_env` into the next `exec.start.env`.
+- `shell.start` creates a live interactive shell stream. Shell-local state such as `cd` and exported variables persists within that live stream.
+- A stream can outlive the connection that created it.
+
+## Envelope
+
+Every message is a JSON object.
+
+Request example:
+
+```json
+{
+  "version": "1",
+  "type": "request",
+  "id": "req-1",
+  "method": "session.create",
+  "payload": {}
+}
+```
+
+Response example:
+
+```json
+{
+  "version": "1",
+  "type": "response",
+  "id": "req-1",
+  "ok": true,
+  "session_id": "sess-000001",
+  "payload": {
+    "session": {
+      "session_id": "sess-000001",
+      "state": "idle",
+      "created_at": "2026-03-15T20:12:34.123456Z",
+      "updated_at": "2026-03-15T20:12:34.123456Z",
+      "expires_at": "2026-03-15T20:42:34.123456Z",
+      "stream_count": 0
+    }
+  }
+}
+```
+
+Event example:
+
+```json
+{
+  "version": "1",
+  "type": "event",
+  "event": "stream.data",
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "channel": "stdout",
+  "seq": 3,
+  "payload": {
+    "data": "aGVsbG8K",
+    "encoding": "base64"
+  }
+}
+```
+
+Envelope fields:
+
+| Field | Present on | Meaning |
+|------|------|------|
+| `version` | requests, responses, events | Protocol version. Requests may omit it; if present it must be `"1"`. Server responses and events always send `"1"`. |
+| `type` | all messages | `"request"`, `"response"`, or `"event"`. |
+| `id` | requests, responses | Client-chosen correlation id. Required on requests. Echoed on responses. |
+| `method` | requests | Method name such as `session.create` or `stream.write`. |
+| `event` | events | Event name such as `stream.data`. |
+| `session_id` | session-scoped and stream-scoped messages | Session routing id. |
+| `stream_id` | stream-scoped messages | Stream routing id. |
+| `channel` | `stream.data` events | `"stdout"` or `"stderr"`. |
+| `seq` | `stream.data` events | Per-channel sequence number. Starts at `1` for each channel on each stream. |
+| `ok` | responses | Boolean success flag. |
+| `payload` | all message types | Method-specific or event-specific object. |
+| `error` | error responses | Error object with `code` and `message`. |
+
+General rules:
+
+- Requests with unknown methods get `METHOD_NOT_FOUND`.
+- Malformed envelopes or invalid JSON payloads get `INVALID_REQUEST`.
+- Clients should key logic off `error.code`, not the human-readable `message`.
+- There is no global ordering across stdout and stderr. Only per-channel `seq` is meaningful.
+
+## Common Payload Types
+
+### Session Summary
+
+Used by `session.create`, `session.get`, `session.list`, `session.destroy`, `session.created`, and `session.updated`.
+
+```json
+{
+  "session_id": "sess-000001",
+  "state": "idle",
+  "created_at": "2026-03-15T20:12:34.123456Z",
+  "updated_at": "2026-03-15T20:12:34.123456Z",
+  "expires_at": "2026-03-15T20:42:34.123456Z",
+  "active_stream_id": "",
+  "stream_count": 0
+}
+```
+
+Fields:
+
+- `session_id`: stable id for the persistent sandbox session
+- `state`: `"idle"` or `"running"`
+- `created_at`, `updated_at`, `expires_at`: UTC timestamps in RFC3339Nano format
+- `expires_at`: omitted while the session is running
+- `active_stream_id`: currently running stream, if any
+- `stream_count`: total retained streams in the session, including exited streams still available for replay
+
+### Stream Summary
+
+Returned from `session.get`.
+
+```json
+{
+  "stream_id": "stream-000002",
+  "kind": "exec",
+  "state": "exited",
+  "created_at": "2026-03-15T20:13:00Z",
+  "updated_at": "2026-03-15T20:13:01Z",
+  "started_at": "2026-03-15T20:13:00Z",
+  "finished_at": "2026-03-15T20:13:01Z"
+}
+```
+
+### Stream Start Response
+
+Returned from `exec.start` and `shell.start`.
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "kind": "exec",
+  "state": "running",
+  "writer_attached": true
+}
+```
+
+### Stream Attach Response
+
+Returned from `stream.attach` and `stream.detach`.
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "state": "running",
+  "writer_attached": false
+}
+```
+
+### Stream Data Payload
+
+Used by `stream.data`.
+
+```json
+{
+  "data": "aGVsbG8K",
+  "encoding": "base64"
+}
+```
+
+`data` is always base64-encoded raw bytes in v1. The server chunks emitted output at 16 KiB raw bytes per event.
+
+### Stream Exit Payload
+
+Used by `stream.exit`.
+
+```json
+{
+  "kind": "exec",
+  "exit_code": 0,
+  "shell_exited": false,
+  "final_env": {
+    "PATH": "/bin",
+    "MODE": "debug"
+  },
+  "control_stderr": ""
+}
+```
+
+Fields:
+
+- `kind`: `"exec"` or `"shell"`
+- `exit_code`: process result code
+- `shell_exited`: only meaningful for `exec.start`
+- `final_env`: only present for `exec.start`
+- `control_stderr`: only present for `exec.start`
+
+Canceled streams report `exit_code: 130`. For canceled exec streams, `control_stderr` is `"execution canceled"`.
+
+### Stream Error Payload
+
+Used by `stream.error`.
+
+```json
+{
+  "code": "INTERNAL",
+  "message": "human readable message"
+}
+```
+
+## Methods
+
+### `hello`
+
+Recommended first request after connecting.
+
+Request:
+
+```json
+{
+  "version": "1",
+  "type": "request",
+  "id": "1",
+  "method": "hello",
+  "payload": {
+    "client_name": "my-client",
+    "client_version": "0.1.0"
+  }
+}
+```
+
+The request payload is optional and currently ignored by the server.
+
+Success response:
+
+```json
+{
+  "version": "1",
+  "type": "response",
+  "id": "1",
+  "ok": true,
+  "payload": {
+    "server_name": "gbash",
+    "server_version": "dev",
+    "capabilities": {
+      "binary": "gbash",
+      "transport": "unix",
+      "reconnect": true,
+      "filesystem_rpc": false,
+      "pty": false,
+      "interactive_shell": true
+    }
+  }
+}
+```
+
+Capability values in v1:
+
+- `binary`: binary identity, for example `gbash` or `gbash-extras`
+- `transport`: always `unix`
+- `reconnect`: always `true`
+- `filesystem_rpc`: always `false`
+- `pty`: always `false`
+- `interactive_shell`: always `true`
+
+### `ping`
+
+Health check request.
+
+Request payload is optional and ignored.
+
+Success response payload:
+
+```json
+{
+  "pong": true
+}
+```
+
+### `session.create`
+
+Creates a new persistent sandbox session.
+
+Request payload is empty or omitted.
+
+Success response payload:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:12:34.123456Z",
+    "expires_at": "2026-03-15T20:42:34.123456Z",
+    "stream_count": 0
+  }
+}
+```
+
+Side effect:
+
+- Broadcasts `session.created` to every connected client with the same session summary payload.
+
+### `session.get`
+
+Returns one session plus all retained streams.
+
+Required envelope fields:
+
+- `session_id`
+
+Success response payload:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "running",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:13:00.000000Z",
+    "active_stream_id": "stream-000002",
+    "stream_count": 1
+  },
+  "streams": [
+    {
+      "stream_id": "stream-000002",
+      "kind": "exec",
+      "state": "running",
+      "created_at": "2026-03-15T20:13:00.000000Z",
+      "updated_at": "2026-03-15T20:13:00.000000Z",
+      "started_at": "2026-03-15T20:13:00.000000Z"
+    }
+  ]
+}
+```
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+
+### `session.list`
+
+Lists all current sessions.
+
+Success response payload:
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess-000001",
+      "state": "idle",
+      "created_at": "2026-03-15T20:12:34.123456Z",
+      "updated_at": "2026-03-15T20:12:34.123456Z",
+      "expires_at": "2026-03-15T20:42:34.123456Z",
+      "stream_count": 0
+    }
+  ]
+}
+```
+
+### `session.destroy`
+
+Destroys an idle session.
+
+Required envelope fields:
+
+- `session_id`
+
+Success response payload:
+
+```json
+{
+  "session": {
+    "session_id": "sess-000001",
+    "state": "idle",
+    "created_at": "2026-03-15T20:12:34.123456Z",
+    "updated_at": "2026-03-15T20:20:00.000000Z",
+    "expires_at": "2026-03-15T20:50:00.000000Z",
+    "stream_count": 0
+  }
+}
+```
+
+Side effects:
+
+- Broadcasts `session.updated` to every connected client with the final session summary.
+- After success, the session is gone from `session.list` and `session.get`.
+
+Error codes:
+
+- `SESSION_BUSY`
+- `SESSION_NOT_FOUND`
+
+### `exec.start`
+
+Starts a non-interactive child stream inside a session.
+
+Required envelope fields:
+
+- `session_id`
+
+Request payload:
+
+```json
+{
+  "name": "build-step",
+  "script": "printf 'hello\\n'",
+  "args": [],
+  "startup_options": [],
+  "env": {
+    "MODE": "debug"
+  },
+  "work_dir": "/tmp",
+  "replace_env": false,
+  "timeout_ms": 5000,
+  "stdin": "closed"
+}
+```
+
+Payload fields:
+
+- `name`: optional execution name
+- `script`: shell script to execute
+- `args`: optional shell positional arguments
+- `startup_options`: optional shell startup options
+- `env`: optional environment overlay
+- `work_dir`: optional working directory
+- `replace_env`: whether `env` replaces the baseline environment instead of overlaying it
+- `timeout_ms`: optional timeout in milliseconds; omitted or `0` means no timeout
+- `stdin`: `"closed"` or `"stream"`, default `"closed"`
+
+Success response payload:
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "kind": "exec",
+  "state": "running",
+  "writer_attached": false
+}
+```
+
+Behavior:
+
+- With `stdin: "closed"`, the creator is attached read-only.
+- With `stdin: "stream"`, the creator becomes the initial stdin writer.
+- The server broadcasts `session.updated` when the stream starts and again when it finishes.
+- Attached clients receive `stream.data`, `stream.error`, and `stream.exit`.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `SESSION_BUSY`
+- `INVALID_ARGUMENT`
+
+### `shell.start`
+
+Starts an interactive shell stream inside a session.
+
+Required envelope fields:
+
+- `session_id`
+
+Request payload:
+
+```json
+{
+  "name": "debug-shell",
+  "args": [],
+  "startup_options": [],
+  "env": {
+    "TERM": "dumb"
+  },
+  "work_dir": "/tmp",
+  "replace_env": false
+}
+```
+
+Success response payload:
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000003",
+  "kind": "shell",
+  "state": "running",
+  "writer_attached": true
+}
+```
+
+Behavior:
+
+- The creator always becomes the initial stdin writer.
+- Shell output is streamed through the same `stream.data` event flow as `exec.start`.
+- The server broadcasts `session.updated` when the stream starts and again when it finishes.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `SESSION_BUSY`
+
+### `stream.attach`
+
+Attaches the current connection to an existing stream and optionally requests stdin ownership.
+
+Required envelope fields:
+
+- `session_id`
+
+Required stream routing:
+
+- `stream_id` may be supplied either in the envelope or inside the payload as `stream_id`
+
+Request payload:
+
+```json
+{
+  "stream_id": "stream-000002",
+  "stdout_seq": 10,
+  "stderr_seq": 2,
+  "write": false
+}
+```
+
+Payload fields:
+
+- `stream_id`: optional if already present in the envelope
+- `stdout_seq`: last stdout sequence number the client has fully processed
+- `stderr_seq`: last stderr sequence number the client has fully processed
+- `write`: request stdin ownership
+
+Success response payload:
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "state": "running",
+  "writer_attached": false
+}
+```
+
+Replay and live delivery behavior:
+
+- After the success response, the server sends buffered `stream.data` events whose `seq` is greater than the provided `stdout_seq` and `stderr_seq`.
+- If the stream has already exited, the replay is followed by one `stream.exit` event.
+- If the stream is still running, future live events continue on the same attachment.
+- Replay and live events may interleave. Clients should use `seq` to deduplicate and order data per channel.
+
+Writer ownership behavior:
+
+- Multiple read-only attachments are allowed.
+- Only one attachment may own stdin writes at a time.
+- Setting `write: true` succeeds only when the stream is still running and stdin is available.
+- If the stream was started without streamable stdin, `write: true` fails with `STREAM_CLOSED`.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `STREAM_NOT_FOUND`
+- `STREAM_STDIN_BUSY`
+- `STREAM_CLOSED`
+- `REPLAY_GAP`
+
+### `stream.detach`
+
+Detaches the current connection from a stream.
+
+Required envelope fields:
+
+- `session_id`
+
+Required stream routing:
+
+- `stream_id` may be supplied either in the envelope or inside the payload as `stream_id`
+
+Request payload:
+
+```json
+{
+  "stream_id": "stream-000002"
+}
+```
+
+Success response payload:
+
+```json
+{
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "state": "running",
+  "writer_attached": false
+}
+```
+
+Behavior:
+
+- Detaching removes this connection from future stream event delivery.
+- If this connection owned stdin, detaching relinquishes ownership.
+- Detaching does not close stdin and does not cancel the stream.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `STREAM_NOT_FOUND`
+
+### `stream.write`
+
+Writes bytes to the running stream's stdin.
+
+Required envelope fields:
+
+- `session_id`
+- `stream_id`
+
+Request payload:
+
+```json
+{
+  "data": "cHJpbnRmICdoZWxsb1xuJw==",
+  "encoding": "base64"
+}
+```
+
+Rules:
+
+- `encoding` may be omitted; it defaults to `"base64"`.
+- The caller must currently own stdin for that stream.
+
+Success response payload:
+
+```json
+{
+  "written": true
+}
+```
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `STREAM_NOT_FOUND`
+- `STREAM_STDIN_OWNER_REQUIRED`
+- `STREAM_CLOSED`
+- `INVALID_ARGUMENT`
+
+### `stream.close`
+
+Closes the stream's stdin.
+
+Required envelope fields:
+
+- `session_id`
+- `stream_id`
+
+Success response payload:
+
+```json
+{
+  "closed": true
+}
+```
+
+Rules:
+
+- The caller must currently own stdin for that stream.
+- Closing stdin does not itself end the stream; it just sends EOF to the running exec or shell.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `STREAM_NOT_FOUND`
+- `STREAM_STDIN_OWNER_REQUIRED`
+- `STREAM_CLOSED`
+
+### `stream.cancel`
+
+Cancels the running stream.
+
+Required envelope fields:
+
+- `session_id`
+- `stream_id`
+
+Success response payload:
+
+```json
+{
+  "canceled": true
+}
+```
+
+Behavior:
+
+- Cancels the underlying context.
+- Closes stdin if it is still open.
+- The stream later terminates with `stream.exit`.
+
+Error codes:
+
+- `SESSION_NOT_FOUND`
+- `STREAM_NOT_FOUND`
+
+## Events
+
+### `session.created`
+
+Broadcast to every currently connected client when `session.create` succeeds.
+
+Payload:
+
+```json
+{
+  "session_id": "sess-000001",
+  "state": "idle",
+  "created_at": "2026-03-15T20:12:34.123456Z",
+  "updated_at": "2026-03-15T20:12:34.123456Z",
+  "expires_at": "2026-03-15T20:42:34.123456Z",
+  "stream_count": 0
+}
+```
+
+### `session.updated`
+
+Broadcast to every currently connected client when a session changes high-level state.
+
+Current emit points:
+
+- after `exec.start` succeeds
+- after `shell.start` succeeds
+- when a stream exits
+- after `session.destroy` succeeds
+
+Payload is the same session summary object as `session.created`.
+
+### `stream.data`
+
+Sent only to connections attached to that stream, plus replayed during `stream.attach`.
+
+Payload:
+
+```json
+{
+  "data": "aGVsbG8K",
+  "encoding": "base64"
+}
+```
+
+Envelope fields:
+
+- `channel`: `"stdout"` or `"stderr"`
+- `seq`: per-channel sequence number starting at `1`
+
+### `stream.exit`
+
+Sent only to connections attached to that stream, plus replayed after a successful `stream.attach` to an exited stream.
+
+Payload:
+
+```json
+{
+  "kind": "exec",
+  "exit_code": 0,
+  "shell_exited": false,
+  "final_env": {
+    "MODE": "debug"
+  },
+  "control_stderr": ""
+}
+```
+
+### `stream.error`
+
+Sent only to connections attached to that stream when the server reports an execution-level error.
+
+Payload:
+
+```json
+{
+  "code": "INTERNAL",
+  "message": "human readable message"
+}
+```
+
+## Errors
+
+Error responses use this shape:
+
+```json
+{
+  "version": "1",
+  "type": "response",
+  "id": "req-1",
+  "ok": false,
+  "session_id": "sess-000001",
+  "stream_id": "stream-000002",
+  "error": {
+    "code": "SESSION_BUSY",
+    "message": "session is busy: sess-000001"
+  }
+}
+```
+
+Known error codes in v1:
+
+| Code | Meaning |
+|------|------|
+| `INVALID_REQUEST` | Malformed envelope, unsupported `version`, wrong `type`, missing request `id`, or invalid JSON payload shape. |
+| `METHOD_NOT_FOUND` | Unknown request method. |
+| `INVALID_ARGUMENT` | Unsupported payload value such as bad `stdin` mode or unsupported encoding. |
+| `SESSION_NOT_FOUND` | No such session. |
+| `SESSION_BUSY` | The target session already has a running stream. |
+| `STREAM_NOT_FOUND` | No such stream in that session. |
+| `STREAM_CLOSED` | The stream is exited or does not have writable stdin. |
+| `STREAM_STDIN_BUSY` | Another attachment currently owns stdin. |
+| `STREAM_STDIN_OWNER_REQUIRED` | The caller tried to write or close stdin without owning it. |
+| `REPLAY_GAP` | The requested replay cursor is older than the retained buffer. |
+| `INTERNAL` | Unexpected server-side failure. |
+
+## Reconnect, Replay, and Expiry
+
+Reconnect behavior in v1:
+
+- Closing a connection detaches that connection from every stream.
+- Connection close also relinquishes stdin ownership for any stream the connection owned.
+- Connection close does not cancel the running stream.
+- Another client can later call `stream.attach` and optionally claim stdin ownership.
+
+Replay behavior:
+
+- Each stream keeps separate bounded replay buffers for stdout and stderr.
+- Retention is configured by `ReplayBytes` and applies per channel, per stream.
+- `stdout_seq` and `stderr_seq` are "last seen" cursors.
+- `0` means "replay everything still retained".
+- If the requested cursor is older than the earliest retained chunk, the server returns `REPLAY_GAP`.
+
+Expiry behavior:
+
+- `SessionTTL` is configured at server startup.
+- A session becomes idle when it has no active running stream.
+- Idle sessions expire after `SessionTTL`.
+- New but unused sessions also expire after `SessionTTL`.
+- There is no dedicated `session.expired` event in v1. Expired sessions simply disappear from `session.list`, and later lookups fail with `SESSION_NOT_FOUND`.
+
+## Full Example
+
+Create a session, run one exec stream, and read its output:
+
+Client request:
+
+```json
+{"version":"1","type":"request","id":"1","method":"hello","payload":{"client_name":"demo"}}
+{"version":"1","type":"request","id":"2","method":"session.create","payload":{}}
+{"version":"1","type":"request","id":"3","method":"exec.start","session_id":"sess-000001","payload":{"script":"printf 'hi\\n'","stdin":"closed"}}
+```
+
+Server replies and events:
+
+```json
+{"version":"1","type":"response","id":"1","ok":true,"payload":{"server_name":"gbash","server_version":"dev","capabilities":{"binary":"gbash","transport":"unix","reconnect":true,"filesystem_rpc":false,"pty":false,"interactive_shell":true}}}
+{"version":"1","type":"response","id":"2","ok":true,"session_id":"sess-000001","payload":{"session":{"session_id":"sess-000001","state":"idle","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:12:34.123456Z","expires_at":"2026-03-15T20:42:34.123456Z","stream_count":0}}}
+{"version":"1","type":"event","event":"session.created","session_id":"sess-000001","payload":{"session_id":"sess-000001","state":"idle","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:12:34.123456Z","expires_at":"2026-03-15T20:42:34.123456Z","stream_count":0}}
+{"version":"1","type":"response","id":"3","ok":true,"session_id":"sess-000001","stream_id":"stream-000002","payload":{"session_id":"sess-000001","stream_id":"stream-000002","kind":"exec","state":"running","writer_attached":false}}
+{"version":"1","type":"event","event":"session.updated","session_id":"sess-000001","payload":{"session_id":"sess-000001","state":"running","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:13:00.000000Z","active_stream_id":"stream-000002","stream_count":1}}
+{"version":"1","type":"event","event":"stream.data","session_id":"sess-000001","stream_id":"stream-000002","channel":"stdout","seq":1,"payload":{"data":"aGkK","encoding":"base64"}}
+{"version":"1","type":"event","event":"stream.exit","session_id":"sess-000001","stream_id":"stream-000002","payload":{"kind":"exec","exit_code":0,"shell_exited":false,"final_env":{"PATH":"/bin"}}}
+{"version":"1","type":"event","event":"session.updated","session_id":"sess-000001","payload":{"session_id":"sess-000001","state":"idle","created_at":"2026-03-15T20:12:34.123456Z","updated_at":"2026-03-15T20:13:01.000000Z","expires_at":"2026-03-15T20:43:01.000000Z","stream_count":1}}
+```
+
+## Current Limits
+
+The v1 server intentionally does not provide:
+
+- filesystem RPC
+- PTY resize or host TTY emulation
+- signal forwarding or job control
+- restart-persistent sessions
+
+If you are embedding gbash directly and do not need a wire protocol, use the normal in-process `Runtime` and `Session` APIs instead.
