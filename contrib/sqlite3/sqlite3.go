@@ -122,9 +122,9 @@ func (c *SQLite3) Run(ctx context.Context, inv *commands.Invocation) error {
 	}
 
 	if parsed.sqlText == "" {
-		data, err := io.ReadAll(inv.Stdin)
+		data, err := commands.ReadAllStdin(ctx, inv)
 		if err != nil {
-			return &commands.ExitError{Code: 1, Err: err}
+			return err
 		}
 		parsed.sqlText = string(data)
 	}
@@ -326,9 +326,9 @@ func readSQLiteDatabase(ctx context.Context, inv *commands.Invocation, name stri
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := io.ReadAll(file)
+	data, err := commands.ReadAll(ctx, inv, file)
 	if err != nil {
-		return nil, &commands.ExitError{Code: 1, Err: err}
+		return nil, err
 	}
 	return data, nil
 }

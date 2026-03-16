@@ -3,7 +3,6 @@ package awk
 import (
 	"bytes"
 	"context"
-	"io"
 	"strings"
 
 	"github.com/benhoyt/goawk/interp"
@@ -201,9 +200,9 @@ func readNamedInputs(ctx context.Context, inv *commands.Invocation, names []stri
 		if !defaultStdin {
 			return nil, nil
 		}
-		data, err := io.ReadAll(inv.Stdin)
+		data, err := commands.ReadAllStdin(ctx, inv)
 		if err != nil {
-			return nil, &commands.ExitError{Code: 1, Err: err}
+			return nil, err
 		}
 		return []namedInput{{Data: data}}, nil
 	}
@@ -216,9 +215,9 @@ func readNamedInputs(ctx context.Context, inv *commands.Invocation, names []stri
 	for _, name := range names {
 		if name == "-" {
 			if !stdinRead {
-				data, err := io.ReadAll(inv.Stdin)
+				data, err := commands.ReadAllStdin(ctx, inv)
 				if err != nil {
-					return nil, &commands.ExitError{Code: 1, Err: err}
+					return nil, err
 				}
 				stdinData = data
 				stdinRead = true
@@ -243,9 +242,9 @@ func readAllFile(ctx context.Context, inv *commands.Invocation, name string) ([]
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := io.ReadAll(file)
+	data, err := commands.ReadAll(ctx, inv, file)
 	if err != nil {
-		return nil, &commands.ExitError{Code: 1, Err: err}
+		return nil, err
 	}
 	return data, nil
 }
