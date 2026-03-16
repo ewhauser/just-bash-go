@@ -274,6 +274,9 @@ linters:
         text: "use of `unix\\.Uname` forbidden"
         linters:
           - forbidigo
+      - path: contrib/extras/cmd/gbash-extras/main\.go$
+        linters:
+          - forbidigo
       - path: internal/fuzztest/
         linters:
           - forbidigo

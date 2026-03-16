@@ -469,7 +469,7 @@ func collectJQInputs(ctx context.Context, inv *commands.Invocation, opts *jqOpti
 
 func readJQInputSources(ctx context.Context, inv *commands.Invocation, inputs []string) (*jqSources, error) {
 	if len(inputs) == 0 {
-		data, err := readAllStdin(inv)
+		data, err := readAllStdin(ctx, inv)
 		if err != nil {
 			return nil, err
 		}
@@ -495,7 +495,7 @@ func readJQInputSources(ctx context.Context, inv *commands.Invocation, inputs []
 			if stdinUsed {
 				data = nil
 			} else {
-				data, err = readAllStdin(inv)
+				data, err = readAllStdin(ctx, inv)
 				stdinUsed = true
 			}
 		} else {
@@ -872,10 +872,10 @@ func exitf(inv *commands.Invocation, code int, format string, args ...any) error
 	return commands.Exitf(inv, code, format, args...)
 }
 
-func readAllStdin(inv *commands.Invocation) ([]byte, error) {
-	data, err := io.ReadAll(inv.Stdin)
+func readAllStdin(ctx context.Context, inv *commands.Invocation) ([]byte, error) {
+	data, err := commands.ReadAllStdin(ctx, inv)
 	if err != nil {
-		return nil, &commands.ExitError{Code: 1, Err: err}
+		return nil, err
 	}
 	return data, nil
 }
@@ -899,9 +899,9 @@ func readAllFile(ctx context.Context, inv *commands.Invocation, name string) (da
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err = io.ReadAll(file)
+	data, err = commands.ReadAll(ctx, inv, file)
 	if err != nil {
-		return nil, "", &commands.ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return data, abs, nil
 }
