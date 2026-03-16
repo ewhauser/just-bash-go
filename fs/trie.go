@@ -432,9 +432,21 @@ func (f *TrieFS) Symlink(_ context.Context, target, linkName string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	abs, err := f.resolveCreatePathLocked(Resolve(f.cwd, linkName), 0)
-	if err != nil {
-		return &os.PathError{Op: "symlink", Path: Resolve(f.cwd, linkName), Err: err}
+	requested := Resolve(f.cwd, linkName)
+	abs, entry, err := f.resolvePathLocked(linkName, false, true)
+	switch {
+	case err == nil && entry != nil:
+		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
+	case err == nil:
+		// Resolved symlinked parents and found a missing final leaf.
+	case errors.Is(err, stdfs.ErrNotExist):
+		parentAbs, parentErr := f.resolveCreatePathLocked(parentDir(requested), 0)
+		if parentErr != nil {
+			return &os.PathError{Op: "symlink", Path: requested, Err: parentErr}
+		}
+		abs = Resolve(parentAbs, path.Base(requested))
+	default:
+		return &os.PathError{Op: "symlink", Path: requested, Err: err}
 	}
 	if entry, _ := f.lookupAbsNoFollowLocked(abs); entry != nil {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}

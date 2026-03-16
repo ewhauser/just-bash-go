@@ -240,6 +240,28 @@ func TestBenchmarkBackendsSymlinkCreationInSymlinkedDirectory(t *testing.T) {
 					t.Fatalf("read existing target = %q, want %q", got, want)
 				}
 			})
+
+			t.Run("final symlink literal path", func(t *testing.T) {
+				fsys := backend.new(t)
+				if err := fsys.Symlink(context.Background(), "/real/missing.txt", "/link"); err != nil {
+					t.Fatalf("Symlink(/link) error = %v", err)
+				}
+
+				err := fsys.Symlink(context.Background(), "target.txt", "/link")
+				if !errors.Is(err, stdfs.ErrExist) {
+					t.Fatalf("Symlink(/link) error = %v, want exist", err)
+				}
+				target, err := fsys.Readlink(context.Background(), "/link")
+				if err != nil {
+					t.Fatalf("Readlink(/link) error = %v", err)
+				}
+				if got, want := target, "/real/missing.txt"; got != want {
+					t.Fatalf("Readlink(/link) = %q, want %q", got, want)
+				}
+				if _, err := fsys.Lstat(context.Background(), "/real/missing.txt"); !errors.Is(err, stdfs.ErrNotExist) {
+					t.Fatalf("Lstat(/real/missing.txt) error = %v, want not exist", err)
+				}
+			})
 		})
 	}
 }

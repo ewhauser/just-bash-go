@@ -220,9 +220,21 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	abs, err := m.resolveCreatePathLocked(Resolve(m.cwd, linkName), 0)
-	if err != nil {
-		return &os.PathError{Op: "symlink", Path: Resolve(m.cwd, linkName), Err: err}
+	requested := Resolve(m.cwd, linkName)
+	abs, node, err := m.resolvePathLocked(linkName, false, true)
+	switch {
+	case err == nil && node != nil:
+		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
+	case err == nil:
+		// Resolved symlinked parents and found a missing final leaf.
+	case errors.Is(err, stdfs.ErrNotExist):
+		parentAbs, parentErr := m.resolveCreatePathLocked(parentDir(requested), 0)
+		if parentErr != nil {
+			return &os.PathError{Op: "symlink", Path: requested, Err: parentErr}
+		}
+		abs = Resolve(parentAbs, path.Base(requested))
+	default:
+		return &os.PathError{Op: "symlink", Path: requested, Err: err}
 	}
 	if _, exists := m.nodes[abs]; exists {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
