@@ -169,6 +169,34 @@ func TestBenchmarkBackendsChownPreservesModTime(t *testing.T) {
 	}
 }
 
+func TestBenchmarkBackendsRenameIntoSymlinkedDirectoryAllowsMissingLeaf(t *testing.T) {
+	t.Parallel()
+
+	for _, backend := range benchmarkBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fsys := backend.new(t)
+			writeFile(t, fsys, "/from.txt", "payload\n")
+			writeFile(t, fsys, "/real/existing.txt", "existing\n")
+			if err := fsys.Symlink(context.Background(), "/real", "/link"); err != nil {
+				t.Fatalf("Symlink() error = %v", err)
+			}
+
+			if err := fsys.Rename(context.Background(), "/from.txt", "/link/new.txt"); err != nil {
+				t.Fatalf("Rename() error = %v", err)
+			}
+			if _, err := fsys.Stat(context.Background(), "/from.txt"); !errors.Is(err, stdfs.ErrNotExist) {
+				t.Fatalf("Stat(/from.txt) error = %v, want not exist", err)
+			}
+			if got, want := readFile(t, fsys, "/real/new.txt"), "payload\n"; got != want {
+				t.Fatalf("read renamed target = %q, want %q", got, want)
+			}
+			if got, want := readFile(t, fsys, "/link/new.txt"), "payload\n"; got != want {
+				t.Fatalf("read through symlink = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestBenchmarkBackendsSnapshotAndOverlay(t *testing.T) {
 	t.Parallel()
 

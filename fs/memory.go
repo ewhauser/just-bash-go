@@ -684,7 +684,7 @@ func (m *MemoryFS) resolveAbsLocked(abs string, followFinal, allowMissingFinal b
 			if !isLast {
 				target = Resolve(target, path.Join(parts[i+1:]...))
 			}
-			return m.resolveAbsLocked(target, true, allowMissingFinal && isLast, depth+1)
+			return m.resolveAbsLocked(target, true, allowMissingFinal, depth+1)
 		}
 		if isLast {
 			return next, node, nil

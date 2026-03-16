@@ -727,7 +727,7 @@ func (f *TrieFS) resolveAbsLocked(abs string, followFinal, allowMissingFinal boo
 			if !isLast {
 				target = Resolve(target, path.Join(parts[i+1:]...))
 			}
-			return f.resolveAbsLocked(target, true, allowMissingFinal && isLast, depth+1)
+			return f.resolveAbsLocked(target, true, allowMissingFinal, depth+1)
 		}
 		if isLast {
 			return nextAbs, child, nil
